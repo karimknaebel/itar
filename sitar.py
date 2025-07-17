@@ -3,7 +3,7 @@ from pathlib import Path
 
 import msgpack
 from mini.itar.indexed_tar import IndexedTar, TarIndex
-from mini.itar.sharded_indexed_tar import ShardedIndexedTar
+from mini.itar.sharded_indexed_tar import SafeShardedIndexedTar, ShardedIndexedTar
 
 
 class SITar(ShardedIndexedTar):
@@ -33,6 +33,17 @@ class SITar(ShardedIndexedTar):
             msgpack.dump(
                 ([str(Path(s).relative_to(path.parent)) for s in shards], indices), f
             )
+
+
+class SafeSITar(SafeShardedIndexedTar):
+    def __init__(self, path: str | os.PathLike):
+        path = Path(path)
+        with open(path, "rb") as f:
+            shards, indices = msgpack.load(f)
+        super().__init__(
+            shards=[path.parent / shard for shard in shards],
+            indices=indices,
+        )
 
 
 if __name__ == "__main__":
