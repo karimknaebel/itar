@@ -6,6 +6,7 @@ from typing import IO
 
 from .indexed_tar import TarIndex
 from .utils import (
+    TarIndexError,
     TarMember,
     build_tar_index,
     check_tar_index,
@@ -157,6 +158,14 @@ def cli_check():
     parser.add_argument("sitar", type=Path, help="Paths to the sitar index file")
     args = parser.parse_args()
 
+    return_code = 0
+
     with ShardedIndexedTar.open(args.sitar) as sitar:
         for member in tqdm(sitar, desc="Checking files"):
-            sitar.check_tar_index([member])
+            try:
+                sitar.check_tar_index([member])
+            except TarIndexError as e:
+                print(e)
+                return_code = 1
+
+    return return_code

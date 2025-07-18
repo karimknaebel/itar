@@ -77,6 +77,10 @@ def build_tar_index(tar: str | os.PathLike | IO[bytes] | TarFile) -> TarIndex:
         return {member.name: resolve(member, members) for member in members.values()}
 
 
+class TarIndexError(Exception):
+    pass
+
+
 def check_tar_index(
     name: str,
     tar_offset: TarMember,
@@ -93,7 +97,7 @@ def check_tar_index(
             or info.sparse != sparse
         )
     ):
-        raise ValueError(
+        raise TarIndexError(
             f"Index mismatch: "
             f"expected ({name}, {offset}, {offset_data}, {size}, {sparse}), "
             f"got ({info.name}, {info.offset}, {info.offset_data}, {info.size}, {info.sparse})"
