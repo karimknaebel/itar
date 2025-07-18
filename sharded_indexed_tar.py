@@ -79,8 +79,8 @@ class ShardedIndexedTar(Mapping):
         offset, _, _, _ = member
         return tar_file_info(offset, file_obj)
 
-    def check_tar_index(self):
-        for name in self:
+    def check_tar_index(self, names: list[str] | None = None):
+        for name in names if names is not None else self:
             file_obj, member = self._shard(name)
             check_tar_index(name, member, file_obj)
 
@@ -126,10 +126,10 @@ class ShardedIndexedTar(Mapping):
             yield (name, self[name])
 
 
-if __name__ == "__main__":
+def cli_create():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Create a SITar archive.")
+    parser = argparse.ArgumentParser(description="Create a sitar index.")
     parser.add_argument("shards", nargs="+", type=Path, help="Paths to the tar shards")
     args = parser.parse_args()
 
@@ -146,3 +146,17 @@ if __name__ == "__main__":
 
     with ShardedIndexedTar(args.shards) as sitar:
         sitar.save(path)
+
+
+def cli_check():
+    import argparse
+
+    from tqdm import tqdm
+
+    parser = argparse.ArgumentParser(description="Check an existing sitar index.")
+    parser.add_argument("sitar", type=Path, help="Paths to the sitar index file")
+    args = parser.parse_args()
+
+    with ShardedIndexedTar.open(args.sitar) as sitar:
+        for member in tqdm(sitar, desc="Checking files"):
+            sitar.check_tar_index([member])
