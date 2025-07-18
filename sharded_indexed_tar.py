@@ -22,18 +22,25 @@ class ShardedIndexedTar(Mapping):
         self,
         shards: list[str | os.PathLike | IO[bytes]],
         index: ShardedTarIndex | None = None,
+        progress_bar: bool = False,
     ):
         self._needed_open = [isinstance(s, str | os.PathLike) for s in shards]
         self._shard_file_objs: IO[bytes] = [
             open(tar, "rb") if needs_open else tar
             for tar, needs_open in zip(shards, self._needed_open, strict=True)
         ]
+        if progress_bar:
+            from tqdm import tqdm
+        else:
+            tqdm = lambda x, **kwargs: x  # noqa: E731
         self._index = (
             index
             if index is not None
             else {
                 name: (i, member)
-                for i, file_obj in enumerate(self._shard_file_objs)
+                for i, file_obj in enumerate(
+                    tqdm(self._shard_file_objs, desc="Building index", unit="shard")
+                )
                 for name, member in build_tar_index(file_obj).items()
             }
         )
@@ -145,7 +152,7 @@ def cli_create():
     for i, shard in enumerate(args.shards):
         assert shard == ShardedIndexedTar.shard_path(path, num_shards, i)
 
-    with ShardedIndexedTar(args.shards) as sitar:
+    with ShardedIndexedTar(args.shards, progress_bar=True) as sitar:
         sitar.save(path)
 
 
@@ -161,7 +168,7 @@ def cli_check():
     return_code = 0
 
     with ShardedIndexedTar.open(args.sitar) as sitar:
-        for member in tqdm(sitar, desc="Checking files"):
+        for member in tqdm(sitar, desc="Checking files", unit="file"):
             try:
                 sitar.check_tar_index([member])
             except TarIndexError as e:
