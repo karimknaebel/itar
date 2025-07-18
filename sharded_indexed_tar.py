@@ -1,50 +1,100 @@
 import os
-from collections.abc import Collection, Mapping
-from contextlib import contextmanager
+from collections.abc import Mapping
+from pathlib import Path
 from tarfile import TarInfo
 from typing import IO
 
-from .indexed_tar import IndexedTar, TarIndex
+from .indexed_tar import TarIndex
+from .utils import (
+    TarMember,
+    build_tar_index,
+    check_tar_index,
+    tar_file_info,
+    tar_file_reader,
+)
+
+ShardedTarIndex = dict[str, (int, TarMember)]  # fname -> (shard_idx, TarMember)
 
 
 class ShardedIndexedTar(Mapping):
     def __init__(
         self,
         shards: list[str | os.PathLike | IO[bytes]],
-        indices: list[TarIndex | None] | None = None,
+        index: ShardedTarIndex | None = None,
     ):
-        if indices is None:
-            indices = [None] * len(shards)
-        self._shards = [
-            IndexedTar(tar, index) for tar, index in zip(shards, indices, strict=True)
+        self._needed_open = [isinstance(s, str | os.PathLike) for s in shards]
+        self._shard_file_objs: IO[bytes] = [
+            open(tar, "rb") if needs_open else tar
+            for tar, needs_open in zip(shards, self._needed_open, strict=True)
         ]
-        self._shard_index = {
-            name: idx for idx, shard in enumerate(self._shards) for name in shard
-        }
+        self._index = (
+            index
+            if index is not None
+            else {
+                name: (i, member)
+                for i, file_obj in enumerate(self._shard_file_objs)
+                for name, member in build_tar_index(file_obj).items()
+            }
+        )
 
-    def shard(self, name: str) -> IndexedTar:
-        return self._shards[self._shard_index[name]]
+    @classmethod
+    def open(
+        cls, path: str | os.PathLike, shards: list[str | os.PathLike] | None = None
+    ):
+        import msgpack
+
+        path = Path(path)
+        with open(path, "rb") as f:
+            num_shards, index = msgpack.load(f)
+        return cls(
+            shards
+            if shards is not None
+            else [cls.shard_path(path, num_shards, i) for i in range(num_shards)],
+            index,
+        )
+
+    def save(self, path: str | os.PathLike):
+        import msgpack
+
+        path = Path(path)
+        with open(path, "wb") as f:
+            msgpack.dump((len(self._shard_file_objs), self.index), f)
+
+    @staticmethod
+    def shard_path(path: str | os.PathLike, num_shards: int, shard_idx: int) -> Path:
+        path = Path(path)
+        return path.parent / f"{path.stem}-{shard_idx:0{len(str(num_shards - 1))}d}.tar"
+
+    def _shard(self, name: str) -> tuple[IO[bytes], TarMember]:
+        i, member = self._index[name]
+        return self._shard_file_objs[i], member
 
     def file(self, name: str) -> IO[bytes]:
-        """
-        Note: all files in the same shard share the same underlying file object,
-        so it is not safe to read from multiple files in the same shard concurrently.
-        """
-        return self.shard(name).file(name)
+        file_obj, member = self._shard(name)
+        _, offset_data, size, sparse = member
+        return tar_file_reader(name, offset_data, size, sparse, file_obj)
 
     def info(self, name: str) -> TarInfo:
-        return self.shard(name).info(name)
+        file_obj, member = self._shard(name)
+        offset, _, _, _ = member
+        return tar_file_info(offset, file_obj)
 
-    def verify_index(self, name: str):
-        return self.shard(name).verify_index(name)
+    def check_tar_index(self):
+        for name in self:
+            file_obj, member = self._shard(name)
+            check_tar_index(name, member, file_obj)
 
     @property
-    def indices(self) -> list[TarIndex]:
-        return [shard.index for shard in self._shards]
+    def index(self) -> list[TarIndex]:
+        return self._index
 
     def close(self):
-        for itar in self._shards:
-            itar.close()
+        for needed_open, file_obj in zip(
+            self._needed_open, self._shard_file_objs, strict=True
+        ):
+            if needed_open:
+                # only close what we opened
+                file_obj.close()
 
     def __enter__(self):
         return self
@@ -56,78 +106,43 @@ class ShardedIndexedTar(Mapping):
         return self.file(name)
 
     def __contains__(self, name: str) -> bool:
-        return name in self._shard_index
+        return name in self._index
 
     def __iter__(self):
-        return iter(self._shard_index)
+        return iter(self._index)
 
     def __len__(self):
-        return len(self._shard_index)
+        return len(self._index)
 
     def keys(self):
-        return self._shard_index.keys()
+        return self._index.keys()
 
     def values(self):
-        for name in self._shard_index:
+        for name in self._index:
             yield self[name]
 
     def items(self):
-        for name in self._shard_index:
+        for name in self._index:
             yield (name, self[name])
 
 
-class SafeShardedIndexedTar(Collection):
-    """
-    This is a thread-safe version of ShardedIndexedTar. Every operation uses a new file descriptor.
-    """
+if __name__ == "__main__":
+    import argparse
 
-    def __init__(
-        self,
-        shards: list[str | os.PathLike | IO[bytes]],
-        indices: list[TarIndex | None] | None = None,
-    ):
-        if indices is None:
-            indices = [None] * len(shards)
-        self._shards = shards
-        self._indices = [
-            IndexedTar(tar, index).index
-            for tar, index in zip(shards, indices, strict=True)
-        ]
-        self._shard_index = {
-            name: idx for idx, index in enumerate(indices) for name in index
-        }
+    parser = argparse.ArgumentParser(description="Create a SITar archive.")
+    parser.add_argument("shards", nargs="+", type=Path, help="Paths to the tar shards")
+    args = parser.parse_args()
 
-    def shard(self, name: str) -> IndexedTar:
-        return IndexedTar(
-            tar=self._shards[self._shard_index[name]],
-            index=self._indices[self._shard_index[name]],
-        )
+    num_shards = len(args.shards)
+    assert num_shards > 0
 
-    @contextmanager
-    def open(self, name: str) -> IO[bytes]:
-        with (
-            self.shard(name) as shard,
-            shard.file(name) as f,  # this is not really necessary
-        ):
-            yield f
+    path = (
+        args.shards[0].parent / args.shards[0].stem[: -len(str(num_shards - 1)) - 1]
+    ).with_suffix(".sitar")
 
-    def info(self, name: str) -> TarInfo:
-        with self.shard(name) as shard:
-            return shard.info(name)
+    # ensure shards are named correctly
+    for i, shard in enumerate(args.shards):
+        assert shard == ShardedIndexedTar.shard_path(path, num_shards, i)
 
-    def verify_index(self, name: str):
-        with self.shard(name) as shard:
-            return shard.verify_index(name)
-
-    @property
-    def indices(self) -> list[TarIndex]:
-        return self._indices
-
-    def __contains__(self, name: str) -> bool:
-        return name in self._shard_index
-
-    def __iter__(self):
-        return iter(self._shard_index)
-
-    def __len__(self):
-        return len(self._shard_index)
+    with ShardedIndexedTar(args.shards) as sitar:
+        sitar.save(path)
