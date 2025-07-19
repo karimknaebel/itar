@@ -134,13 +134,37 @@ class ShardedIndexedTar(Mapping):
             yield (name, self[name])
 
 
-def cli_create():
+def cli():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Create a sitar index.")
-    parser.add_argument("shards", nargs="+", type=Path, help="Paths to the tar shards")
+    parser = argparse.ArgumentParser(description="Create or check a sitar index.")
+    subparsers = parser.add_subparsers(dest="command")
+
+    create_parser = subparsers.add_parser("create", help="Create a sitar index")
+    create_parser.add_argument(
+        "shards", nargs="+", type=Path, help="Paths to the tar shards"
+    )
+
+    check_parser = subparsers.add_parser("check", help="Check an existing sitar index")
+    check_parser.add_argument("sitar", type=Path, help="Path to the sitar index file")
+
+    ls_parser = subparsers.add_parser("ls", help="List files in a sitar index")
+    ls_parser.add_argument("sitar", type=Path, help="Path to the sitar index file")
+    ls_parser.add_argument(
+        "-l", "--long", action="store_true", help="Show long listing format"
+    )
+
     args = parser.parse_args()
 
+    if args.command == "create":
+        _create(args)
+    elif args.command == "check":
+        _check(args)
+    elif args.command == "ls":
+        _ls(args)
+
+
+def _create(args):
     num_shards = len(args.shards)
     assert num_shards > 0
 
@@ -156,16 +180,10 @@ def cli_create():
         sitar.save(path)
 
 
-def cli_check():
-    import argparse
-
+def _check(args):
     from tqdm import tqdm
 
-    parser = argparse.ArgumentParser(description="Check an existing sitar index.")
-    parser.add_argument("sitar", type=Path, help="Paths to the sitar index file")
-    args = parser.parse_args()
-
-    return_code = 0
+    did_error = False
 
     with ShardedIndexedTar.open(args.sitar) as sitar:
         for member in tqdm(sitar, desc="Checking files", unit="file"):
@@ -173,6 +191,23 @@ def cli_check():
                 sitar.check_tar_index([member])
             except TarIndexError as e:
                 print(e)
-                return_code = 1
+                did_error = True
 
-    return return_code
+    if did_error:
+        exit(1)
+
+
+def _ls(args):
+    with ShardedIndexedTar.open(args.sitar) as sitar:
+        if args.long:
+            for member in sitar:
+                shard_idx, (offset, offset_data, size, sparse) = sitar.index[member]
+                print(
+                    f"{member:<40} {shard_idx:>5} {offset:>12} {offset_data:>12} {size:>10} {str(sparse):>7}"
+                )
+            print(
+                f"{'NAME':<40} {'SHARD':>5} {'OFFSET':>12} {'OFF_DATA':>12} {'SIZE':>10} {'SPARSE':>7}"
+            )
+        else:
+            for member in sitar:
+                print(member)
