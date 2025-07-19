@@ -79,14 +79,14 @@ class ShardedIndexedTar(Mapping):
 
     def file(self, name: str) -> IO[bytes]:
         file_obj, member = self._shard(name)
-        _, offset_data, size, sparse = member
+        _, offset_data, size = member
         if isinstance(size, str):
             return self.file(size)  # symlink or hard link
-        return tar_file_reader(name, offset_data, size, sparse, file_obj)
+        return tar_file_reader(name, offset_data, size, file_obj)
 
     def info(self, name: str) -> TarInfo:
         file_obj, member = self._shard(name)
-        offset, _, _, _ = member
+        offset, _, _ = member
         return tar_file_info(offset, file_obj)
 
     def check_tar_index(self, names: list[str] | None = None):
@@ -203,12 +203,12 @@ def _ls(args):
     with ShardedIndexedTar.open(args.sitar) as sitar:
         if args.long:
             for member in sitar:
-                shard_idx, (offset, offset_data, size, sparse) = sitar.index[member]
+                shard_idx, (offset, offset_data, size) = sitar.index[member]
                 print(
-                    f"{member:<40} {shard_idx:>5} {offset:>12} {offset_data:>12} {size:>10} {str(sparse):>7}"
+                    f"{member:<40} {shard_idx:>5} {offset:>12} {offset_data:>12} {size:>10}"
                 )
             print(
-                f"{'NAME':<40} {'SHARD':>5} {'OFFSET':>12} {'OFF_DATA':>12} {'SIZE':>10} {'SPARSE':>7}"
+                f"{'NAME':<40} {'SHARD':>5} {'OFFSET':>12} {'OFF_DATA':>12} {'SIZE':>10}"
             )
         else:
             for member in sitar:

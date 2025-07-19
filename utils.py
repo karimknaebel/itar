@@ -7,9 +7,7 @@ from tarfile import ExFileObject, TarFile, TarInfo
 from types import SimpleNamespace
 from typing import IO
 
-TarMember = tuple[
-    int, int, int | str, bool
-]  # (offset, offset_data, size | linkname, sparse)
+TarMember = tuple[int, int, int | str]  # (offset, offset_data, size | linkname)
 TarIndex = dict[str, TarMember]  # fname -> TarOffset
 
 
@@ -17,12 +15,11 @@ def tar_file_reader(
     name: str,
     offset_data: int,
     size: int,
-    sparse: list[tuple[int, int]] | None,
     file_obj: IO[bytes],
 ) -> IO[bytes]:
     return ExFileObject(
         SimpleNamespace(fileobj=file_obj),
-        SimpleNamespace(offset_data=offset_data, size=size, name=name, sparse=sparse),
+        SimpleNamespace(offset_data=offset_data, size=size, name=name, sparse=None),
     )
 
 
@@ -50,12 +47,10 @@ def tarinfo2member(tarinfo: TarInfo) -> TarMember:
     else:
         size = tarinfo.size
 
-    return (
-        tarinfo.offset,
-        tarinfo.offset_data,
-        size,
-        tarinfo.sparse,
-    )
+    if tarinfo.sparse is not None:
+        raise NotImplementedError("Sparse files are not supported")
+
+    return (tarinfo.offset, tarinfo.offset_data, size)
 
 
 def build_tar_index(tar: str | os.PathLike | IO[bytes] | TarFile) -> TarIndex:
@@ -81,19 +76,18 @@ def check_tar_index(
     tar_offset: TarMember,
     file_obj: IO[bytes],
 ):
-    offset, offset_data, size, sparse = tar_offset
+    offset, offset_data, size = tar_offset
     info = tar_file_info(offset, file_obj)
     if (
         info.offset != offset
         or info.name != name
         or info.offset_data != offset_data
         or (info.size != size and not info.islnk() and not info.issym())
-        or info.sparse != sparse
     ):
         raise TarIndexError(
             f"Index mismatch: "
-            f"expected ({name}, {offset}, {offset_data}, {size}, {sparse}), "
-            f"got ({info.name}, {info.offset}, {info.offset_data}, {info.size}, {info.sparse})"
+            f"expected ({name}, {offset}, {offset_data}, {size}), "
+            f"got ({info.name}, {info.offset}, {info.offset_data}, {info.size})"
         )
 
 
