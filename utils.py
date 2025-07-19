@@ -7,7 +7,9 @@ from tarfile import ExFileObject, TarFile, TarInfo
 from types import SimpleNamespace
 from typing import IO
 
-TarMember = tuple[int, int, int | str, bool]  # (offset, offset_data, size, sparse)
+TarMember = tuple[
+    int, int, int | str, bool
+]  # (offset, offset_data, size | linkname, sparse)
 TarIndex = dict[str, TarMember]  # fname -> TarOffset
 
 
@@ -40,9 +42,11 @@ def tar_file_info(offset: int, file_obj: IO[bytes]) -> TarInfo:
 
 def tarinfo2member(tarinfo: TarInfo) -> TarMember:
     if tarinfo.issym():
-        size = "/".join(filter(None, (os.path.dirname(tarinfo.name), tarinfo.linkname)))
+        size = os.path.normpath(
+            "/".join(filter(None, (os.path.dirname(tarinfo.name), tarinfo.linkname)))
+        )
     elif tarinfo.islnk():
-        size = tarinfo.linkname
+        size = os.path.normpath(tarinfo.linkname)
     else:
         size = tarinfo.size
 
