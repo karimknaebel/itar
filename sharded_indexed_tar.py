@@ -83,10 +83,6 @@ class ShardedIndexedTar(Mapping):
         path = Path(path)
         return path.parent / f"{path.stem}-{shard_idx:0{len(str(num_shards - 1))}d}.tar"
 
-    def _shard(self, name: str) -> tuple[IO[bytes], TarMember]:
-        i, member = self._index[name]
-        return self._shard_file_objs[i], member
-
     def file(self, name: str) -> IO[bytes]:
         i, member = self._index[name]
         _, offset_data, size = member
