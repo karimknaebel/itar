@@ -4,8 +4,8 @@ from pathlib import Path
 from tarfile import TarInfo
 from typing import IO
 
-from .indexed_tar import TarIndex
 from .utils import (
+    TarIndex,
     TarIndexError,
     TarMember,
     build_tar_index,
@@ -80,6 +80,8 @@ class ShardedIndexedTar(Mapping):
     def file(self, name: str) -> IO[bytes]:
         file_obj, member = self._shard(name)
         _, offset_data, size, sparse = member
+        if isinstance(size, str):
+            return self.file(size)  # symlink or hard link
         return tar_file_reader(name, offset_data, size, sparse, file_obj)
 
     def info(self, name: str) -> TarInfo:

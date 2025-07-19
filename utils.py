@@ -7,7 +7,7 @@ from tarfile import ExFileObject, TarFile, TarInfo
 from types import SimpleNamespace
 from typing import IO
 
-TarMember = tuple[int, int, int, bool]  # (offset, offset_data, size, sparse)
+TarMember = tuple[int, int, int | str, bool]  # (offset, offset_data, size, sparse)
 TarIndex = dict[str, TarMember]  # fname -> TarOffset
 
 
@@ -38,6 +38,22 @@ def tar_file_info(offset: int, file_obj: IO[bytes]) -> TarInfo:
     )
 
 
+def tarinfo2member(tarinfo: TarInfo) -> TarMember:
+    if tarinfo.issym():
+        size = "/".join(filter(None, (os.path.dirname(tarinfo.name), tarinfo.linkname)))
+    elif tarinfo.islnk():
+        size = tarinfo.linkname
+    else:
+        size = tarinfo.size
+
+    return (
+        tarinfo.offset,
+        tarinfo.offset_data,
+        size,
+        tarinfo.sparse,
+    )
+
+
 def build_tar_index(tar: str | os.PathLike | IO[bytes] | TarFile) -> TarIndex:
     if isinstance(tar, str | os.PathLike):
         tar = tarfile.open(tar, "r:")
@@ -48,33 +64,8 @@ def build_tar_index(tar: str | os.PathLike | IO[bytes] | TarFile) -> TarIndex:
         tar = tarfile.open(fileobj=tar, mode="r:")
 
     with tar as f:
-
-        def resolve(
-            member: TarInfo, index: dict[str, TarInfo], offset: int | None = None
-        ) -> TarInfo:
-            if member.issym():
-                return resolve(
-                    index[
-                        "/".join(
-                            filter(
-                                None, (os.path.dirname(member.name), member.linkname)
-                            )
-                        )
-                    ],
-                    index,
-                    offset=member.offset,
-                )
-            elif member.islnk():
-                return resolve(index[member.linkname], index, offset=member.offset)
-            return (
-                offset if offset is not None else member.offset,
-                member.offset_data,
-                member.size,
-                member.sparse,
-            )
-
         members = {member.name: member for member in f.getmembers()}
-        return {member.name: resolve(member, members) for member in members.values()}
+        return {member.name: tarinfo2member(member) for member in members.values()}
 
 
 class TarIndexError(Exception):
@@ -88,14 +79,12 @@ def check_tar_index(
 ):
     offset, offset_data, size, sparse = tar_offset
     info = tar_file_info(offset, file_obj)
-    if info.offset != offset or (
-        not (info.islnk() or info.issym())
-        and (
-            info.name != name
-            or info.offset_data != offset_data
-            or info.size != size
-            or info.sparse != sparse
-        )
+    if (
+        info.offset != offset
+        or info.name != name
+        or info.offset_data != offset_data
+        or (info.size != size and not info.islnk() and not info.issym())
+        or info.sparse != sparse
     ):
         raise TarIndexError(
             f"Index mismatch: "
