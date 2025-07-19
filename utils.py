@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from typing import IO, BinaryIO
 
 TarMember = tuple[int, int, int | str]  # (offset, offset_data, size | linkname)
-TarIndex = dict[str, TarMember]  # fname -> TarOffset
 
 
 def tar_file_info(offset: int, file_obj: IO[bytes]) -> TarInfo:
@@ -41,7 +40,9 @@ def tarinfo2member(tarinfo: TarInfo) -> TarMember:
     return (tarinfo.offset, tarinfo.offset_data, size)
 
 
-def build_tar_index(tar: str | os.PathLike | IO[bytes] | TarFile) -> TarIndex:
+def build_tar_index(
+    tar: str | os.PathLike | IO[bytes] | TarFile,
+) -> dict[str, TarMember]:
     if isinstance(tar, str | os.PathLike):
         tar = tarfile.open(tar, "r:")
     elif isinstance(tar, TarFile):

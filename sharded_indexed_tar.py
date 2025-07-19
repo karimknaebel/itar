@@ -7,7 +7,6 @@ from typing import IO, Callable
 
 from .utils import (
     TarFileSectionIO,
-    TarIndex,
     TarIndexError,
     TarMember,
     ThreadSafeFileIO,
@@ -28,8 +27,8 @@ class ShardedIndexedTar(Mapping):
         progress_bar: bool = False,
     ):
         self._needs_open = [isinstance(s, str | os.PathLike) for s in shards]
-        # NOTE: We buffer individual file sections, not whole shards.
-        # Initially benchmarks showed that the default `open` buffer size of 8192 noticably slows down reading of many small files.
+        # NOTE: For best performance, we only buffer individual file sections, not whole shards.
+        # Initial benchmarks showed that the default `open` buffer size of 8192 noticably slows down reading of many small files.
         self._shard_file_objs: IO[bytes] = [
             (open_fn(tar) if open_fn else open(tar, "rb", buffering=0))
             if needs_open
@@ -111,7 +110,7 @@ class ShardedIndexedTar(Mapping):
             check_tar_index(name, member, self._shard_file_objs[i])
 
     @property
-    def index(self) -> list[TarIndex]:
+    def index(self) -> ShardedTarIndex:
         return self._index
 
     def close(self):
@@ -220,19 +219,17 @@ def _check(args):
 
 def _ls(args):
     with ShardedIndexedTar.open(args.sitar) as sitar:
-        if args.long:
-            for member in sitar:
-                shard_idx, (offset, offset_data, size) = sitar.index[member]
-                if args.human_readable:
-                    from humanize import naturalsize
+        index = sitar.index
+    if args.long:
+        for member, (shard_idx, (offset, offset_data, size)) in index.items():
+            if args.human_readable:
+                from humanize import naturalsize
 
-                    size = naturalsize(size, gnu=True)
-                print(
-                    f"{member:<40} {shard_idx:>5} {offset:>12} {offset_data:>12} {size:>10}"
-                )
+                size = naturalsize(size, gnu=True)
             print(
-                f"{'NAME':<40} {'SHARD':>5} {'OFFSET':>12} {'OFF_DATA':>12} {'SIZE':>10}"
+                f"{member:<40} {shard_idx:>5} {offset:>12} {offset_data:>12} {size:>10}"
             )
-        else:
-            for member in sitar:
-                print(member)
+        print(f"{'NAME':<40} {'SHARD':>5} {'OFFSET':>12} {'OFF_DATA':>12} {'SIZE':>10}")
+    else:
+        for member in index:
+            print(member)
