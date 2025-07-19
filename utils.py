@@ -64,7 +64,19 @@ def build_tar_index(tar: str | os.PathLike | IO[bytes] | TarFile) -> TarIndex:
 
     with tar as f:
         members = {member.name: member for member in f.getmembers()}
-        return {member.name: tarinfo2member(member) for member in members.values()}
+        return {
+            member.name: tarinfo2member(member)
+            for member in members.values()
+            if (
+                # index only includes files and links. no directories, devices, etc.
+                member.isreg()
+                or (
+                    member.type not in tarfile.SUPPORTED_TYPES
+                )  # Members with unknown types are treated as regular files.
+                or member.issym()
+                or member.islnk()
+            )
+        }
 
 
 class TarIndexError(Exception):

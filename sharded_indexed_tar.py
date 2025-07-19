@@ -155,6 +155,9 @@ def cli():
     ls_parser.add_argument(
         "-l", "--long", action="store_true", help="Show long listing format"
     )
+    ls_parser.add_argument(
+        "-H", "--human-readable", action="store_true", help="Use human-readable sizes"
+    )
 
     args = parser.parse_args()
 
@@ -204,6 +207,10 @@ def _ls(args):
         if args.long:
             for member in sitar:
                 shard_idx, (offset, offset_data, size) = sitar.index[member]
+                if args.human_readable:
+                    from humanize import naturalsize
+
+                    size = naturalsize(size, gnu=True)
                 print(
                     f"{member:<40} {shard_idx:>5} {offset:>12} {offset_data:>12} {size:>10}"
                 )
