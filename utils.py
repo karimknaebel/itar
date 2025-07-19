@@ -3,24 +3,12 @@ import os
 import tarfile
 import threading
 from contextlib import nullcontext
-from tarfile import ExFileObject, TarFile, TarInfo
+from tarfile import TarFile, TarInfo
 from types import SimpleNamespace
-from typing import IO
+from typing import IO, BinaryIO
 
 TarMember = tuple[int, int, int | str]  # (offset, offset_data, size | linkname)
 TarIndex = dict[str, TarMember]  # fname -> TarOffset
-
-
-def tar_file_reader(
-    name: str,
-    offset_data: int,
-    size: int,
-    file_obj: IO[bytes],
-) -> IO[bytes]:
-    return ExFileObject(
-        SimpleNamespace(fileobj=file_obj),
-        SimpleNamespace(offset_data=offset_data, size=size, name=name, sparse=None),
-    )
 
 
 def tar_file_info(offset: int, file_obj: IO[bytes]) -> TarInfo:
@@ -103,7 +91,7 @@ def check_tar_index(
         )
 
 
-class ThreadLocalPreadIO(io.RawIOBase):
+class ThreadSafeFileIO(io.RawIOBase):
     """
     A thread-safe, file-like object that wraps a file descriptor
     and uses os.pread() for concurrent reads.
@@ -173,3 +161,68 @@ class ThreadLocalPreadIO(io.RawIOBase):
 
     def __exit__(self, exc_type, exc_value, tb):
         self.close()
+
+
+class TarFileSectionIO(io.RawIOBase):
+    def __init__(self, fileobj: BinaryIO, offset: int, size: int):
+        self._fileobj = fileobj
+        self._start = offset
+        self._end = offset + size
+        self._pos = 0  # relative position within the slice
+
+    def read(self, size: int = -1) -> bytes:
+        if self._pos >= self._end - self._start:
+            return b""
+
+        abs_pos = self._start + self._pos
+        max_len = self._end - (self._start + self._pos)
+
+        if size < 0 or size > max_len:
+            size = max_len
+
+        self._fileobj.seek(abs_pos)
+        data = self._fileobj.read(size)
+        self._pos += len(data)
+        return data
+
+    def readinto(self, b: bytearray) -> int:
+        data = self.read(len(b))
+        n = len(data)
+        b[:n] = data
+        return n
+
+    def readall(self) -> bytes:
+        return self.read(-1)
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence == io.SEEK_SET:
+            new_pos = offset
+        elif whence == io.SEEK_CUR:
+            new_pos = self._pos + offset
+        elif whence == io.SEEK_END:
+            new_pos = (self._end - self._start) + offset
+        else:
+            raise ValueError(f"Invalid whence: {whence}")
+
+        if new_pos < 0:
+            raise ValueError("Negative seek position")
+        self._pos = min(new_pos, self._end - self._start)
+        return self._pos
+
+    def tell(self) -> int:
+        return self._pos
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def writable(self) -> bool:
+        return False
+
+    def close(self) -> None:
+        pass  # Don't close the underlying file
+
+    def __len__(self) -> int:
+        return self._end - self._start

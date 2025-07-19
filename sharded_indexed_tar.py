@@ -1,17 +1,19 @@
+import io
 import os
 from collections.abc import Mapping
 from pathlib import Path
 from tarfile import TarInfo
-from typing import IO
+from typing import IO, Callable
 
 from .utils import (
+    TarFileSectionIO,
     TarIndex,
     TarIndexError,
     TarMember,
+    ThreadSafeFileIO,
     build_tar_index,
     check_tar_index,
     tar_file_info,
-    tar_file_reader,
 )
 
 ShardedTarIndex = dict[str, (int, TarMember)]  # fname -> (shard_idx, TarMember)
@@ -22,12 +24,17 @@ class ShardedIndexedTar(Mapping):
         self,
         shards: list[str | os.PathLike | IO[bytes]],
         index: ShardedTarIndex | None = None,
+        open_fn: Callable[[str | os.PathLike], IO[bytes]] = None,
         progress_bar: bool = False,
     ):
-        self._needed_open = [isinstance(s, str | os.PathLike) for s in shards]
+        self._needs_open = [isinstance(s, str | os.PathLike) for s in shards]
+        # NOTE: We buffer individual file sections, not whole shards.
+        # Initially benchmarks showed that the default `open` buffer size of 8192 noticably slows down reading of many small files.
         self._shard_file_objs: IO[bytes] = [
-            open(tar, "rb") if needs_open else tar
-            for tar, needs_open in zip(shards, self._needed_open, strict=True)
+            (open_fn(tar) if open_fn else open(tar, "rb", buffering=0))
+            if needs_open
+            else tar
+            for tar, needs_open in zip(shards, self._needs_open, strict=True)
         ]
         if progress_bar:
             from tqdm import tqdm
@@ -47,7 +54,10 @@ class ShardedIndexedTar(Mapping):
 
     @classmethod
     def open(
-        cls, path: str | os.PathLike, shards: list[str | os.PathLike] | None = None
+        cls,
+        path: str | os.PathLike,
+        shards: list[str | os.PathLike] | None = None,
+        thread_safe: bool = False,
     ):
         import msgpack
 
@@ -59,6 +69,7 @@ class ShardedIndexedTar(Mapping):
             if shards is not None
             else [cls.shard_path(path, num_shards, i) for i in range(num_shards)],
             index,
+            open_fn=ThreadSafeFileIO if thread_safe else None,
         )
 
     def save(self, path: str | os.PathLike):
@@ -78,21 +89,26 @@ class ShardedIndexedTar(Mapping):
         return self._shard_file_objs[i], member
 
     def file(self, name: str) -> IO[bytes]:
-        file_obj, member = self._shard(name)
+        i, member = self._index[name]
         _, offset_data, size = member
         if isinstance(size, str):
             return self.file(size)  # symlink or hard link
-        return tar_file_reader(name, offset_data, size, file_obj)
+        tar_file_section = TarFileSectionIO(self._shard_file_objs[i], offset_data, size)
+        return (
+            io.BufferedReader(tar_file_section)  # our file objects are unbuffered
+            if self._needs_open[i]
+            else tar_file_section  # we make no assumptions about buffering of external file objects
+        )
 
     def info(self, name: str) -> TarInfo:
-        file_obj, member = self._shard(name)
+        i, member = self._index[name]
         offset, _, _ = member
-        return tar_file_info(offset, file_obj)
+        return tar_file_info(offset, self._shard_file_objs[i])
 
     def check_tar_index(self, names: list[str] | None = None):
         for name in names if names is not None else self:
-            file_obj, member = self._shard(name)
-            check_tar_index(name, member, file_obj)
+            i, member = self._index[name]
+            check_tar_index(name, member, self._shard_file_objs[i])
 
     @property
     def index(self) -> list[TarIndex]:
@@ -100,7 +116,7 @@ class ShardedIndexedTar(Mapping):
 
     def close(self):
         for needed_open, file_obj in zip(
-            self._needed_open, self._shard_file_objs, strict=True
+            self._needs_open, self._shard_file_objs, strict=True
         ):
             if needed_open:
                 # only close what we opened
