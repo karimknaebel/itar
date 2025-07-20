@@ -1,6 +1,6 @@
-import io
 import os
 from collections.abc import Mapping
+from io import BufferedReader
 from pathlib import Path
 from tarfile import TarInfo
 from typing import IO, Callable
@@ -90,7 +90,7 @@ class ShardedIndexedTar(Mapping):
             return self.file(size)  # symlink or hard link
         tar_file_section = TarFileSectionIO(self._shard_file_objs[i], offset_data, size)
         return (
-            io.BufferedReader(tar_file_section)  # our file objects are unbuffered
+            BufferedReader(tar_file_section)  # our file objects are unbuffered
             if self._needs_open[i]
             else tar_file_section  # we make no assumptions about buffering of external file objects
         )
@@ -150,19 +150,17 @@ class ShardedIndexedTar(Mapping):
 def cli():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Create or check a sitar index.")
+    parser = argparse.ArgumentParser(description="Create or check an itar index.")
     subparsers = parser.add_subparsers(dest="command")
 
-    create_parser = subparsers.add_parser("create", help="Create a sitar index")
-    create_parser.add_argument(
-        "shards", nargs="+", type=Path, help="Paths to the tar shards"
-    )
+    create_parser = subparsers.add_parser("create", help="Create an itar index")
+    create_parser.add_argument("itar", type=Path, help="Path to the itar file")
 
-    check_parser = subparsers.add_parser("check", help="Check an existing sitar index")
-    check_parser.add_argument("sitar", type=Path, help="Path to the sitar index file")
+    check_parser = subparsers.add_parser("check", help="Check an existing itar index")
+    check_parser.add_argument("itar", type=Path, help="Path to the itar file")
 
-    ls_parser = subparsers.add_parser("ls", help="List files in a sitar index")
-    ls_parser.add_argument("sitar", type=Path, help="Path to the sitar index file")
+    ls_parser = subparsers.add_parser("ls", help="List files in an itar index")
+    ls_parser.add_argument("itar", type=Path, help="Path to the itar file")
     ls_parser.add_argument(
         "-l", "--long", action="store_true", help="Show long listing format"
     )
@@ -181,19 +179,33 @@ def cli():
 
 
 def _create(args):
-    num_shards = len(args.shards)
+    import re
+
+    itar_path = Path(args.itar)
+    stem = itar_path.stem
+    pattern = re.compile(rf"^{re.escape(stem)}-\d+\.tar$")
+    shards = sorted(
+        [
+            s
+            for s in itar_path.parent.glob(f"{itar_path.stem}-*.tar")
+            if s.is_file() and pattern.match(s.name)
+        ]
+    )
+    print((itar_path.parent / itar_path.stem))
+    num_shards = len(shards)
     assert num_shards > 0
 
-    path = (
-        args.shards[0].parent / args.shards[0].stem[: -len(str(num_shards - 1)) - 1]
-    ).with_suffix(".sitar")
-
     # ensure shards are named correctly
-    for i, shard in enumerate(args.shards):
-        assert shard == ShardedIndexedTar.shard_path(path, num_shards, i)
+    expected = [
+        ShardedIndexedTar.shard_path(itar_path, num_shards, i)
+        for i in range(num_shards)
+    ]
+    assert shards == expected, (
+        f"Shards do not match expected names: {shards} != {expected}"
+    )
 
-    with ShardedIndexedTar(args.shards, progress_bar=True) as sitar:
-        sitar.save(path)
+    with ShardedIndexedTar(shards, progress_bar=True) as itar:
+        itar.save(itar_path)
 
 
 def _check(args):
@@ -201,10 +213,10 @@ def _check(args):
 
     did_error = False
 
-    with ShardedIndexedTar.open(args.sitar) as sitar:
-        for member in tqdm(sitar, desc="Checking files", unit="file"):
+    with ShardedIndexedTar.open(args.sita) as itar:
+        for member in tqdm(itar, desc="Checking files", unit="file"):
             try:
-                sitar.check_tar_index([member])
+                itar.check_tar_index([member])
             except TarIndexError as e:
                 print(e)
                 did_error = True
@@ -214,8 +226,8 @@ def _check(args):
 
 
 def _ls(args):
-    with ShardedIndexedTar.open(args.sitar) as sitar:
-        index = sitar.index
+    with ShardedIndexedTar.open(args.itar) as itar:
+        index = itar.index
     if args.long:
         for member, (shard_idx, (offset, offset_data, size)) in index.items():
             if args.human_readable:
