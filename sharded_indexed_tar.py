@@ -218,7 +218,7 @@ def _check(args):
 
     did_error = False
 
-    with ShardedIndexedTar.open(args.sita) as itar:
+    with ShardedIndexedTar.open(args.itar) as itar:
         for member in tqdm(itar, desc="Checking files", unit="file"):
             try:
                 itar.check_tar_index([member])
