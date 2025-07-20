@@ -85,6 +85,7 @@ def check_tar_index(
         or info.offset_data != offset_data
         or (info.size != size and not info.islnk() and not info.issym())
     ):
+        # TODO: if link, check that linkname is correct
         raise TarIndexError(
             f"Index mismatch: "
             f"expected ({name}, {offset}, {offset_data}, {size}), "
