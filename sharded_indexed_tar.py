@@ -159,13 +159,15 @@ def cli():
     subparsers = parser.add_subparsers(dest="command")
 
     create_parser = subparsers.add_parser("create", help="Create an itar index")
-    create_parser.add_argument("itar", type=Path, help="Path to the itar file")
+    create_parser.add_argument(
+        "itar", type=Path, help="Path to the new itar index that will be created"
+    )
 
     check_parser = subparsers.add_parser("check", help="Check an existing itar index")
-    check_parser.add_argument("itar", type=Path, help="Path to the itar file")
+    check_parser.add_argument("itar", type=Path, help="Path to the itar index")
 
     ls_parser = subparsers.add_parser("ls", help="List files in an itar index")
-    ls_parser.add_argument("itar", type=Path, help="Path to the itar file")
+    ls_parser.add_argument("itar", type=Path, help="Path to the itar index")
     ls_parser.add_argument(
         "-l", "--long", action="store_true", help="Show long listing format"
     )
