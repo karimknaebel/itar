@@ -198,9 +198,14 @@ def _create(args):
             if s.is_file() and pattern.match(s.name)
         ]
     )
-    print((itar_path.parent / itar_path.stem))
     num_shards = len(shards)
-    assert num_shards > 0
+    if num_shards < 1:
+        print(
+            f"No shards found for {itar_path}.\n"
+            f"Please create shard files first. Expected pattern: "
+            f"'{itar_path.stem}-NN.tar' (where NN is the zero-padded shard index, starting from 0)."
+        )
+        exit(1)
 
     # ensure shards are named correctly
     expected = [
@@ -213,6 +218,7 @@ def _create(args):
 
     with ShardedIndexedTar(shards, progress_bar=True) as itar:
         itar.save(itar_path)
+    print(f"Created itar index at {itar_path} with {num_shards} shards.")
 
 
 def _check(args):
