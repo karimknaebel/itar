@@ -16,12 +16,13 @@ from .utils import (
 )
 
 ShardedTarIndex = dict[str, (int, TarMember)]  # fname -> (shard_idx, TarMember)
+Shard = str | os.PathLike | IO[bytes]
 
 
 class ShardedIndexedTar(Mapping):
     def __init__(
         self,
-        shards: list[str | os.PathLike | IO[bytes]],
+        shards: list[Shard] | tuple[Shard, ...] | Shard,
         index: ShardedTarIndex | None = None,
         open_fn: Callable[[str | os.PathLike], IO[bytes]] = None,
         buffered_file_reader: bool = True,
@@ -32,12 +33,14 @@ class ShardedIndexedTar(Mapping):
         In our (limited) benchmarks, this was the fastest configuration for reading many small files.
         It it possbile that in other scenarios, buffered shard IO and unbuffered file section readers are faster.
         """
-        self._needs_open = [isinstance(s, str | os.PathLike) for s in shards]
+        self._is_sharded = isinstance(shards, (list, tuple))
+        shards = list(shards) if self._is_sharded else [shards]
+        self._needs_open = [isinstance(s, (str, os.PathLike)) for s in shards]
         self._file_reader = BufferedReader if buffered_file_reader else lambda x: x
         open_fn = (
             open_fn or ThreadSafeFileIO
         )  # In our benchmarks, `ThreadSafeFileIO` is even faster than `partial(open, mode="rb", buffering=0)`. Likely due to `pread` being fewer syscalls than `seek` + `read`.
-        self._shard_file_objs: IO[bytes] = [
+        self._shard_file_objs: list[IO[bytes]] = [
             open_fn(tar) if needs_open else tar
             for tar, needs_open in zip(shards, self._needs_open, strict=True)
         ]
@@ -73,7 +76,11 @@ class ShardedIndexedTar(Mapping):
         return cls(
             shards
             if shards is not None
-            else [cls.shard_path(path, num_shards, i) for i in range(num_shards)],
+            else (
+                cls.unsharded_path(path)
+                if num_shards is None
+                else [cls.shard_path(path, num_shards, i) for i in range(num_shards)]
+            ),
             index,
             open_fn=open_fn,
             buffered_file_reader=buffered_file_reader,
@@ -83,13 +90,21 @@ class ShardedIndexedTar(Mapping):
         import msgpack
 
         path = Path(path)
+        num_shards = len(self._shard_file_objs)
+        if not self._is_sharded:
+            assert num_shards == 1
+            num_shards = None
         with open(path, "wb") as f:
-            msgpack.dump((len(self._shard_file_objs), self.index), f)
+            msgpack.dump((num_shards, self.index), f)
 
     @staticmethod
     def shard_path(path: str | os.PathLike, num_shards: int, shard_idx: int) -> Path:
         path = Path(path)
         return path.parent / f"{path.stem}-{shard_idx:0{len(str(num_shards - 1))}d}.tar"
+
+    @staticmethod
+    def unsharded_path(path: str | os.PathLike) -> Path:
+        return Path(path).with_suffix(".tar")
 
     def file(self, name: str) -> IO[bytes]:
         i, member = self._index[name]
@@ -187,38 +202,57 @@ def cli():
 
 def _create(args):
     import re
+    import sys
 
     itar_path = Path(args.itar)
     stem = itar_path.stem
     pattern = re.compile(rf"^{re.escape(stem)}-\d+\.tar$")
-    shards = sorted(
+    indexed_shards = sorted(
         [
             s
             for s in itar_path.parent.glob(f"{itar_path.stem}-*.tar")
             if s.is_file() and pattern.match(s.name)
         ]
     )
-    num_shards = len(shards)
-    if num_shards < 1:
-        print(
-            f"No shards found for {itar_path}.\n"
-            f"Please create shard files first. Expected pattern: "
-            f"'{itar_path.stem}-NN.tar' (where NN is the zero-padded shard index, starting from 0)."
-        )
-        exit(1)
+    unsharded_candidate = ShardedIndexedTar.unsharded_path(itar_path)
+    has_single = unsharded_candidate.is_file()
+    has_indexed = len(indexed_shards) > 0
 
-    # ensure shards are named correctly
-    expected = [
-        ShardedIndexedTar.shard_path(itar_path, num_shards, i)
-        for i in range(num_shards)
-    ]
-    assert shards == expected, (
-        f"Shards do not match expected names: {shards} != {expected}"
-    )
+    if has_single and has_indexed:
+        print(
+            "Found both unsharded (`name.tar`) and sharded (`name-NN.tar`) archives. "
+            "Please remove one convention before creating the index."
+        )
+        sys.exit(1)
+
+    if has_single:
+        shards = unsharded_candidate
+        num_shards = None
+    else:
+        shards = indexed_shards
+        num_shards = len(shards)
+        if num_shards < 1:
+            print(
+                f"No shards found for {itar_path}.\n"
+                f"Please create shard files first. Expected pattern: "
+                f"'{itar_path.stem}-NN.tar' (zero-padded shard index starting from 0) "
+                f"or '{itar_path.stem}.tar' for a single shard."
+            )
+            sys.exit(1)
+
+        expected = [
+            ShardedIndexedTar.shard_path(itar_path, num_shards, i)
+            for i in range(num_shards)
+        ]
+        assert shards == expected, (
+            f"Shards do not match expected names: {shards} != {expected}"
+        )
 
     with ShardedIndexedTar(shards, progress_bar=True) as itar:
         itar.save(itar_path)
-    print(f"Created itar index at {itar_path} with {num_shards} shards.")
+    print(
+        f"Created itar index at {itar_path} with {1 if num_shards is None else num_shards} shard(s)."
+    )
 
 
 def _check(args):

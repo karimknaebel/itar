@@ -377,3 +377,26 @@ def test_sharded_indexed_tar_open_and_save(tmp_path, sharded_tar_and_files):
     itar3 = ShardedIndexedTar.open(itar_path, shards=shard_paths)
     assert set(itar3.keys()) == set(f for files in files_ls for f in files)
     itar3.close()
+
+
+def test_single_shard_basename_roundtrip(tmp_path):
+    files = {"foo.txt": b"hello", "dir/bar.txt": b"world"}
+    tar_buf = make_tar_bytes(files)
+
+    tar_path = tmp_path / "archive.tar"
+    with open(tar_path, "wb") as f:
+        f.write(tar_buf.getbuffer())
+
+    itar_path = tmp_path / "archive.itar"
+    with ShardedIndexedTar(tar_path) as itar:
+        itar.save(itar_path)
+
+    with open(itar_path, "rb") as f:
+        num_shards, index = msgpack.load(f)
+    assert num_shards is None
+    assert set(index.keys()) == set(files.keys())
+
+    with ShardedIndexedTar.open(itar_path) as reopened:
+        for name, content in files.items():
+            with reopened[name] as fh:
+                assert fh.read() == content
