@@ -7,7 +7,7 @@ from tarfile import TarFile, TarInfo
 from types import SimpleNamespace
 from typing import IO, BinaryIO
 
-TarMember = tuple[int, int, int | str]  # (offset, offset_data, size | linkname)
+MemberRecord = tuple[int, int, int | str]  # (offset, offset_data, size | linkname)
 
 
 def tar_file_info(offset: int, file_obj: IO[bytes]) -> TarInfo:
@@ -24,7 +24,7 @@ def tar_file_info(offset: int, file_obj: IO[bytes]) -> TarInfo:
     )
 
 
-def tarinfo2member(tarinfo: TarInfo) -> TarMember:
+def tarinfo2member(tarinfo: TarInfo) -> MemberRecord:
     if tarinfo.issym():
         size = os.path.normpath(
             "/".join(filter(None, (os.path.dirname(tarinfo.name), tarinfo.linkname)))
@@ -42,7 +42,7 @@ def tarinfo2member(tarinfo: TarInfo) -> TarMember:
 
 def build_tar_index(
     tar: str | os.PathLike | IO[bytes] | TarFile,
-) -> dict[str, TarMember]:
+) -> dict[str, MemberRecord]:
     if isinstance(tar, str | os.PathLike):
         tar = tarfile.open(tar, "r:")
     elif isinstance(tar, TarFile):
@@ -74,7 +74,7 @@ class TarIndexError(Exception):
 
 def check_tar_index(
     name: str,
-    tar_offset: TarMember,
+    tar_offset: MemberRecord,
     file_obj: IO[bytes],
 ):
     offset, offset_data, size = tar_offset

@@ -1,5 +1,12 @@
-from .sharded_indexed_tar import ShardedIndexedTar
+from . import index
+from .indexed_tar_file import IndexedTarFile
+
+
+open = index.open
+
 
 __all__ = [
-    "ShardedIndexedTar",
+    "IndexedTarFile",
+    "index",
+    "open",
 ]
