@@ -11,7 +11,7 @@ itar ls foo.itar  # (optional) view the contents of the index
 
 Now you can open and efficiently access the archived files in python in constant time
 ```python
-from mini.itar import ShardedIndexedTar
+from itar import ShardedIndexedTar
 
 with ShardedIndexedTar.open("foo.itar") as itar:
     f = itar.file("bar.txt")  # file-like object
