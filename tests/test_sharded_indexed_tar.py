@@ -4,11 +4,12 @@ import subprocess
 import tarfile
 import threading
 from functools import partial
+from types import SimpleNamespace
 
 import msgpack
 import pytest
 
-from itar.sharded_indexed_tar import ShardedIndexedTar
+from itar.sharded_indexed_tar import ShardedIndexedTar, _create
 from itar.utils import TarIndexError, build_tar_index
 
 
@@ -415,3 +416,79 @@ def test_single_input_bytesio_save(tmp_path):
         num_shards, index = msgpack.load(f)
     assert num_shards is None
     assert set(index) == set(files)
+
+
+def test_open_with_explicit_shards_override(tmp_path):
+    files = {"foo.txt": b"foo"}
+    tar_path = tmp_path / "explicit.tar"
+    with tarfile.open(tar_path, "w") as tf:
+        for name, data in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+
+    itar_path = tmp_path / "explicit.itar"
+    with ShardedIndexedTar(tar_path) as itar:
+        itar.save(itar_path)
+
+    reopened = ShardedIndexedTar.open(itar_path, shards=tar_path)
+    try:
+        assert set(reopened.keys()) == set(files)
+        with reopened["foo.txt"] as f:
+            assert f.read() == b"foo"
+    finally:
+        reopened.close()
+
+    reopened = ShardedIndexedTar.open(itar_path, shards=[tar_path])
+    try:
+        assert set(reopened.keys()) == set(files)
+        with reopened["foo.txt"] as f:
+            assert f.read() == b"foo"
+    finally:
+        reopened.close()
+
+
+def test_create_detects_unsharded(tmp_path):
+    files = {"foo.txt": b"foo"}
+    tar_buf = make_tar_bytes(files)
+
+    tar_path = tmp_path / "archive.tar"
+    with open(tar_path, "wb") as f:
+        f.write(tar_buf.getbuffer())
+
+    itar_path = tmp_path / "archive.itar"
+    _create(SimpleNamespace(itar=itar_path))
+
+    with open(itar_path, "rb") as f:
+        num_shards, index = msgpack.load(f)
+    assert num_shards is None
+    assert set(index.keys()) == set(files)
+
+    with ShardedIndexedTar.open(itar_path) as reopened:
+        with reopened["foo.txt"] as fh:
+            assert fh.read() == b"foo"
+
+
+def test_create_detects_sharded(tmp_path):
+    files_a = {"foo.txt": b"foo"}
+    files_b = {"bar.txt": b"bar"}
+    shard_data = [files_a, files_b]
+
+    for idx, mapping in enumerate(shard_data):
+        buf = make_tar_bytes(mapping)
+        shard_path = ShardedIndexedTar.shard_path(
+            tmp_path / "archive.itar", len(shard_data), idx
+        )
+        with open(shard_path, "wb") as f:
+            f.write(buf.getbuffer())
+
+    itar_path = tmp_path / "archive.itar"
+    _create(SimpleNamespace(itar=itar_path))
+
+    with open(itar_path, "rb") as f:
+        num_shards, index = msgpack.load(f)
+    assert num_shards == len(shard_data)
+    assert set(index.keys()) == {"foo.txt", "bar.txt"}
+
+    with ShardedIndexedTar.open(itar_path) as reopened:
+        assert set(reopened.keys()) == {"foo.txt", "bar.txt"}
