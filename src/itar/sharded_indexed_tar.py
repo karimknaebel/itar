@@ -22,7 +22,7 @@ Shard = str | os.PathLike | IO[bytes]
 class ShardedIndexedTar(Mapping):
     def __init__(
         self,
-        shards: list[Shard] | tuple[Shard, ...] | Shard,
+        shards: list[Shard] | Shard,
         index: ShardedTarIndex | None = None,
         open_fn: Callable[[str | os.PathLike], IO[bytes]] = None,
         buffered_file_reader: bool = True,
@@ -33,7 +33,7 @@ class ShardedIndexedTar(Mapping):
         In our (limited) benchmarks, this was the fastest configuration for reading many small files.
         It it possbile that in other scenarios, buffered shard IO and unbuffered file section readers are faster.
         """
-        self._is_sharded = isinstance(shards, (list, tuple))
+        self._is_sharded = isinstance(shards, list)
         shards = list(shards) if self._is_sharded else [shards]
         self._needs_open = [isinstance(s, (str, os.PathLike)) for s in shards]
         self._file_reader = BufferedReader if buffered_file_reader else lambda x: x
@@ -64,7 +64,7 @@ class ShardedIndexedTar(Mapping):
     def open(
         cls,
         path: str | os.PathLike,
-        shards: list[str | os.PathLike] | None = None,
+        shards: list[Shard] | Shard | None = None,
         open_fn: Callable[[str | os.PathLike], IO[bytes]] = None,
         buffered_file_reader: bool = True,
     ):

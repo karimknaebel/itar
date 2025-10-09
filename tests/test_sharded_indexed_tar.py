@@ -7,6 +7,7 @@ from functools import partial
 
 import msgpack
 import pytest
+
 from itar.sharded_indexed_tar import ShardedIndexedTar
 from itar.utils import TarIndexError, build_tar_index
 
@@ -400,3 +401,17 @@ def test_single_shard_basename_roundtrip(tmp_path):
         for name, content in files.items():
             with reopened[name] as fh:
                 assert fh.read() == content
+
+
+def test_single_input_bytesio_save(tmp_path):
+    files = {"only.txt": b"payload"}
+    tar_buf = make_tar_bytes(files)
+
+    itar_path = tmp_path / "single.itar"
+    with ShardedIndexedTar(tar_buf) as itar:
+        itar.save(itar_path)
+
+    with open(itar_path, "rb") as f:
+        num_shards, index = msgpack.load(f)
+    assert num_shards is None
+    assert set(index) == set(files)
