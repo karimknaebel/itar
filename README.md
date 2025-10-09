@@ -5,7 +5,9 @@
 ```bash
 echo Hello world! > bar.txt
 tar cf foo-0.tar bar.txt  # create regular tar file(s) with zero-padded shard number
+
 itar create foo.itar  # create the index
+
 itar ls foo.itar  # (optional) view the contents of the index
 ```
 
