@@ -1,5 +1,4 @@
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -11,6 +10,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Work with indexed TAR files.")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.required = True
+
+    cat_parser = subparsers.add_parser(
+        "cat", help="Stream a member from an index to stdout"
+    )
+    cat_parser.add_argument("index", type=Path, help="Path to the .itar index file")
+    cat_parser.add_argument("member", help="Member path to stream")
+    cat_parser.set_defaults(func=_cmd_cat)
+
+    ls_parser = subparsers.add_parser(
+        "ls", aliases=["list"], help="List members recorded in an index"
+    )
+    ls_parser.add_argument("index", type=Path, help="Path to the .itar index file")
+    ls_parser.add_argument(
+        "-l", "--long", action="store_true", help="Show shard and offset details"
+    )
+    ls_parser.add_argument(
+        "--bytes",
+        action="store_true",
+        help="Render sizes as number of bytes",
+    )
+    ls_parser.set_defaults(func=_cmd_ls)
 
     index_parser = subparsers.add_parser("index", help="Manage .itar index files")
     index_subparsers = index_parser.add_subparsers(dest="index_command")
@@ -64,10 +84,9 @@ def main() -> None:
         "-l", "--long", action="store_true", help="Show shard and offset details"
     )
     list_parser.add_argument(
-        "-H",
-        "--human-readable",
+        "--bytes",
         action="store_true",
-        help="Render sizes in human units",
+        help="Render sizes as number of bytes",
     )
     list_parser.set_defaults(func=_cmd_index_list)
 
@@ -98,15 +117,8 @@ def _resolve_shards_for_create(
             raise CLIError(f"Single tar not found: {single_tar}")
         return single_tar, None
 
-    stem = index_path.stem
-    pattern = re.compile(rf"^{re.escape(stem)}-\d+\.tar$")
-    indexed_shards = [
-        candidate
-        for candidate in index_path.parent.glob(f"{index_path.stem}-*.tar")
-        if candidate.is_file() and pattern.match(candidate.name)
-    ]
-    indexed_shards.sort()
     layout = index.IndexLayout(index_path)
+    indexed_shards = layout.discover_shards()
     single_tar_candidate = layout.single_tar()
     has_single = single_tar_candidate.is_file()
     has_indexed = len(indexed_shards) > 0
@@ -139,6 +151,27 @@ def _resolve_shards_for_create(
     return shards, num_shards
 
 
+def _cmd_cat(args) -> None:
+    try:
+        with index.open(args.index) as archive:
+            try:
+                source = archive.file(args.member)
+            except KeyError as exc:  # pragma: no cover - defensive
+                raise CLIError(f"Member not found: {args.member}") from exc
+
+            try:
+                while True:
+                    chunk = source.read(64 * 1024)
+                    if not chunk:
+                        break
+                    sys.stdout.buffer.write(chunk)
+                sys.stdout.buffer.flush()
+            finally:
+                source.close()
+    except FileNotFoundError as exc:  # pragma: no cover - defensive
+        raise CLIError(str(exc)) from exc
+
+
 def _cmd_index_create(args) -> None:
     index_path = Path(args.index)
     shards, num_shards = _resolve_shards_for_create(
@@ -169,11 +202,32 @@ def _cmd_index_check(args) -> None:
         sys.exit(1)
 
 
+def _cmd_ls(args) -> None:
+    _, current_index = index.load(args.index)
+    if args.long:
+        max_size = 0
+        lines = []
+        for member, (shard_idx, (offset, offset_data, size)) in current_index.items():
+            if not args.bytes:
+                from humanize import naturalsize
+
+                size = naturalsize(size, gnu=True)
+            else:
+                size = str(size)
+            max_size = max(max_size, len(size))
+            lines.append((size, member))
+        for line in [f"{size:>{max_size}} {member}" for size, member in lines]:
+            print(line)
+    else:
+        for member in current_index:
+            print(member)
+
+
 def _cmd_index_list(args) -> None:
     _, current_index = index.load(args.index)
     if args.long:
         for member, (shard_idx, (offset, offset_data, size)) in current_index.items():
-            if args.human_readable:
+            if not args.bytes:
                 from humanize import naturalsize
 
                 size = naturalsize(size, gnu=True)
@@ -181,11 +235,6 @@ def _cmd_index_list(args) -> None:
                 f"{member:<40} {shard_idx:>5} {offset:>12} {offset_data:>12} {size:>10}"
             )
         print(f"{'NAME':<40} {'SHARD':>5} {'OFFSET':>12} {'OFF_DATA':>12} {'SIZE':>10}")
-        return
-
-    for member in current_index:
-        print(member)
-
-
-if __name__ == "__main__":
-    main()
+    else:
+        for member in current_index:
+            print(member)

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import itar
-from itar.cli import _cmd_index_create
+from itar.cli import _cmd_cat, _cmd_index_create
 from itar.indexed_tar_file import IndexedTarFile
 from itar.utils import TarIndexError, build_tar_index
 
@@ -260,6 +260,20 @@ def test_indexed_tar_missing_key(sharded_tar_and_files):
     with pytest.raises(KeyError):
         _ = archive["notfound.txt"]
     archive.close()
+
+
+def test_cli_cat_streams_member(tmp_path, capsys):
+    files = {"foo.txt": b"hello"}
+    tar_buf = make_tar_bytes(files)
+    tar_path = tmp_path / "cat.tar"
+    tar_path.write_bytes(tar_buf.getbuffer())
+
+    index_path = tmp_path / "cat.itar"
+    itar.index.create(index_path, tar_path)
+
+    _cmd_cat(SimpleNamespace(index=index_path, member="foo.txt"))
+    captured = capsys.readouterr()
+    assert captured.out == "hello"
 
 
 @pytest.fixture
