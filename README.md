@@ -2,7 +2,9 @@
 
 [![image](https://img.shields.io/pypi/v/itar.svg)](https://pypi.python.org/pypi/itar)
 
-`itar` builds constant-time indexes for one or more TAR shards so you can seek directly to a member without extracting the archive. The project ships a small CLI (`itar`) and a Python helper (`IndexedTarFile`) plus a module-level `itar.open()` convenience that mirrors `tarfile.open()`.
+`itar` builds constant‑time indexes over one or more tar file shards, enabling direct, random access to members without extracting the archives. It ships a lightweight CLI (`itar`) and a Python API.
+
+Designed for large datasets and deep‑learning pipelines, it supports single or sharded tar archives with thread‑safe access for concurrent reads.
 
 ## Quickstart (single tarball)
 
