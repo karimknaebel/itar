@@ -1,5 +1,7 @@
 # itar
 
+[![image](https://img.shields.io/pypi/v/itar.svg)](https://pypi.python.org/pypi/itar)
+
 `itar` builds constant-time indexes for one or more TAR shards so you can seek directly to a member without extracting the archive. The project ships a small CLI (`itar`) and a Python helper (`IndexedTarFile`) plus a module-level `itar.open()` convenience that mirrors `tarfile.open()`.
 
 ## Quickstart (single tarball)
