@@ -16,11 +16,11 @@ def main() -> None:
     index_subparsers = index_parser.add_subparsers(dest="index_command")
     index_subparsers.required = True
 
-    build_parser = index_subparsers.add_parser(
-        "build", help="Create an index file from one or more TAR shards"
+    create_parser = index_subparsers.add_parser(
+        "create", help="Create an index file from one or more TAR shards"
     )
-    build_parser.add_argument("index", type=Path, help="Destination .itar index file")
-    build_parser.add_argument(
+    create_parser.add_argument("index", type=Path, help="Destination .itar index file")
+    create_parser.add_argument(
         "--shards",
         type=Path,
         nargs="+",
@@ -29,20 +29,20 @@ def main() -> None:
             "Explicit shard files to index. Use when you want to bypass auto-discovery."
         ),
     )
-    build_parser.add_argument(
+    create_parser.add_argument(
         "--single",
         type=Path,
         dest="single_tar",
         metavar="TAR",
         help="Path to a single TAR archive. Ignored if --shards is provided.",
     )
-    build_parser.add_argument(
+    create_parser.add_argument(
         "--no-progress",
         dest="progress",
         action="store_false",
         help="Disable the indexing progress bar",
     )
-    build_parser.set_defaults(progress=True, func=_cmd_index_build)
+    create_parser.set_defaults(progress=True, func=_cmd_index_create)
 
     check_parser = index_subparsers.add_parser(
         "check", help="Verify every member recorded in an index file"
@@ -83,7 +83,7 @@ class CLIError(RuntimeError):
     """Raised for recoverable CLI errors."""
 
 
-def _resolve_shards_for_build(
+def _resolve_shards_for_create(
     index_path: Path,
     explicit_shards: list[Path] | None,
     single_tar: Path | None,
@@ -139,9 +139,9 @@ def _resolve_shards_for_build(
     return shards, num_shards
 
 
-def _cmd_index_build(args) -> None:
+def _cmd_index_create(args) -> None:
     index_path = Path(args.index)
-    shards, num_shards = _resolve_shards_for_build(
+    shards, num_shards = _resolve_shards_for_create(
         index_path, args.shards, args.single_tar
     )
     index.create(index_path, shards, progress_bar=args.progress)

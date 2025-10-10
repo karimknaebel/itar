@@ -11,7 +11,7 @@ Designed for large datasets and deep‑learning pipelines, it supports single or
 ```bash
 echo "Hello world!" > hello.txt
 tar cf hello.tar hello.txt       # regular tarball
-itar index build hello.itar      # indexes hello.tar
+itar index create hello.itar     # indexes hello.tar
 itar index list hello.itar       # list indexed members
 ```
 
@@ -34,7 +34,7 @@ Give each shard a zero-padded suffix before building the index:
 ```bash
 tar cf photos-0.tar wedding/   # shard 0
 tar cf photos-1.tar vacation/  # shard 1
-itar index build photos.itar   # discovers photos-0.tar, photos-1.tar, ...
+itar index create photos.itar  # discovers photos-0.tar, photos-1.tar, ...
 itar index list -l photos.itar # shard index, offsets, byte sizes
 ```
 
@@ -55,7 +55,7 @@ num_shards, stored_index = itar.index.load("photos.itar")
 
 | Command | Purpose |
 | --- | --- |
-| `itar index build <archive>.itar [--single TAR \| --shards shard0.tar shard1.tar ...]` | Indexes a single archive or an explicit set of shards. With no flags, shards are auto-discovered next to `<archive>.itar`. |
+| `itar index create <archive>.itar [--single TAR \| --shards shard0.tar shard1.tar ...]` | Indexes a single archive or an explicit set of shards. With no flags, shards are auto-discovered next to `<archive>.itar`. |
 | `itar index list <archive>.itar` | Lists members. Use `-l` for shard/offset info and `-H` for human-readable sizes. |
 | `itar index check <archive>.itar` | Validates recorded entries; add `--member NAME` to focus on specific files. |
 

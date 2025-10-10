@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import itar
-from itar.cli import _cmd_index_build
+from itar.cli import _cmd_index_create
 from itar.indexed_tar_file import IndexedTarFile
 from itar.utils import TarIndexError, build_tar_index
 
@@ -457,7 +457,7 @@ def test_create_detects_single_tar(tmp_path):
         f.write(tar_buf.getbuffer())
 
     index_path = tmp_path / "archive.itar"
-    _cmd_index_build(
+    _cmd_index_create(
         SimpleNamespace(index=index_path, shards=None, single_tar=None, progress=True)
     )
 
@@ -483,7 +483,7 @@ def test_create_detects_sharded(tmp_path):
             f.write(buf.getbuffer())
 
     index_path = tmp_path / "archive.itar"
-    _cmd_index_build(
+    _cmd_index_create(
         SimpleNamespace(index=index_path, shards=None, single_tar=None, progress=True)
     )
 
