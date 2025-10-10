@@ -15,7 +15,7 @@ itar index list hello.itar       # list indexed members
 import itar
 
 with itar.open("hello.itar") as archive:
-    assert archive["hello.txt"].read() == b"Hello world!\n"
+    print(archive["hello.txt"].read())
 
 # If you just need the index dictionary without opening handles:
 index = itar.index.build("hello.tar")

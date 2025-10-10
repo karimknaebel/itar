@@ -170,8 +170,7 @@ def _cmd_index_check(args) -> None:
 
 
 def _cmd_index_list(args) -> None:
-    with index.open(args.index) as archive:
-        current_index = archive.index
+    _, current_index = index.load(args.index)
     if args.long:
         for member, (shard_idx, (offset, offset_data, size)) in current_index.items():
             if args.human_readable:

@@ -1,14 +1,13 @@
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from io import BufferedReader
 from tarfile import TarInfo
 from typing import IO, Callable
 
 from .utils import (
-    TarFileSectionIO,
     MemberRecord,
+    TarFileSectionIO,
     ThreadSafeFileIO,
-    build_tar_index,
     check_tar_index,
     tar_file_info,
 )
@@ -26,24 +25,6 @@ def _normalize_shards(
     return is_sharded, normalized, needs_open
 
 
-def _build_index_from_fileobjs(
-    file_objs: Iterable[IO[bytes]],
-    *,
-    progress_bar: bool,
-) -> IndexedTarIndex:
-    iterator = file_objs
-    if progress_bar:
-        from tqdm import tqdm
-
-        iterator = tqdm(file_objs, desc="Building index", unit="shard")
-
-    return {
-        name: (i, member)
-        for i, file_obj in enumerate(iterator)
-        for name, member in build_tar_index(file_obj).items()
-    }
-
-
 class IndexedTarFile(Mapping):
     def __init__(
         self,
@@ -55,7 +36,7 @@ class IndexedTarFile(Mapping):
         if index is None:
             raise ValueError("index must be provided")
 
-        self._is_sharded, shards, self._needs_open = _normalize_shards(shards)
+        _, shards, self._needs_open = _normalize_shards(shards)
         self._file_reader = BufferedReader if buffered_file_reader else lambda x: x
         open_fn = (
             open_fn or ThreadSafeFileIO
@@ -84,10 +65,6 @@ class IndexedTarFile(Mapping):
         for name in names if names is not None else self:
             i, member = self._index[name]
             check_tar_index(name, member, self._shard_file_objs[i])
-
-    @property
-    def index(self) -> IndexedTarIndex:
-        return self._index
 
     def close(self):
         for needed_open, file_obj in zip(

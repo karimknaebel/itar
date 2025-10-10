@@ -1,6 +1,7 @@
 import builtins
 import os
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import IO, Callable
 
@@ -8,9 +9,9 @@ from .indexed_tar_file import (
     IndexedTarFile,
     IndexedTarIndex,
     Shard,
-    _build_index_from_fileobjs,
     _normalize_shards,
 )
+from .utils import build_tar_index
 
 
 class IndexLayout:
@@ -48,6 +49,24 @@ class IndexLayout:
         ]
         candidates.sort()
         return candidates
+
+
+def _build_index_from_fileobjs(
+    file_objs: Iterable[IO[bytes]],
+    *,
+    progress_bar: bool,
+) -> IndexedTarIndex:
+    iterator = file_objs
+    if progress_bar:
+        from tqdm import tqdm
+
+        iterator = tqdm(file_objs, desc="Building index", unit="shard")
+
+    return {
+        name: (i, member)
+        for i, file_obj in enumerate(iterator)
+        for name, member in build_tar_index(file_obj).items()
+    }
 
 
 def build(
