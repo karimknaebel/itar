@@ -53,7 +53,7 @@ num_shards, stored_index = itar.index.load("photos.itar")
 
 | Command | Purpose |
 | --- | --- |
-| `itar index build <archive>.itar [--single TAR | --shards shard0.tar shard1.tar ...]` | Indexes a single archive or an explicit set of shards. With no flags, shards are auto-discovered next to `<archive>.itar`. |
+| `itar index build <archive>.itar [--single TAR \| --shards shard0.tar shard1.tar ...]` | Indexes a single archive or an explicit set of shards. With no flags, shards are auto-discovered next to `<archive>.itar`. |
 | `itar index list <archive>.itar` | Lists members. Use `-l` for shard/offset info and `-H` for human-readable sizes. |
 | `itar index check <archive>.itar` | Validates recorded entries; add `--member NAME` to focus on specific files. |
 
