@@ -6,11 +6,13 @@
 
 Designed for large datasets and deep‑learning pipelines, it supports single or sharded tar archives with thread‑safe access for concurrent reads.
 
-## Quickstart (single tarball)
+## Quickstart
 
 ```bash
 pip install itar[cli]
 ```
+
+### Single tarball
 
 ```bash
 echo "Hello world!" > hello.txt
@@ -27,7 +29,7 @@ with itar.open("hello.itar") as archive:
     print(archive["hello.txt"].read())
 ```
 
-## Quickstart (sharded tarballs)
+### Sharded tarballs
 
 Give each shard a zero-padded suffix before building the index:
 
