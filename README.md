@@ -9,6 +9,10 @@ Designed for large datasets and deep‑learning pipelines, it supports single or
 ## Quickstart (single tarball)
 
 ```bash
+pip install itar[cli]
+```
+
+```bash
 echo "Hello world!" > hello.txt
 tar cf hello.tar hello.txt       # regular tarball
 
@@ -28,11 +32,11 @@ with itar.open("hello.itar") as archive:
 Give each shard a zero-padded suffix before building the index:
 
 ```bash
-tar cf photos-0.tar wedding/   # shard 0
-tar cf photos-1.tar vacation/  # shard 1
+tar cf photos-0.tar wedding/    # shard 0
+tar cf photos-1.tar vacation/   # shard 1
 
-itar index create photos.itar  # discovers photos-0.tar, photos-1.tar, ...
-itar index list -l photos.itar # shard index, offsets, byte sizes
+itar index create photos.itar   # discovers photos-0.tar, photos-1.tar, ...
+itar index list -l photos.itar  # shard index, offsets, byte sizes
 ```
 
 ```python
