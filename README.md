@@ -11,6 +11,7 @@ Designed for large datasets and deep‑learning pipelines, it supports single or
 ```bash
 echo "Hello world!" > hello.txt
 tar cf hello.tar hello.txt       # regular tarball
+
 itar index create hello.itar     # indexes hello.tar
 itar index list hello.itar       # list indexed members
 ```
@@ -20,11 +21,6 @@ import itar
 
 with itar.open("hello.itar") as archive:
     print(archive["hello.txt"].read())
-
-# If you just need the index dictionary without opening handles:
-index = itar.index.build("hello.tar")
-# Write the index file to disk:
-itar.index.dump(index, "hello.itar")
 ```
 
 ## Quickstart (sharded tarballs)
@@ -34,6 +30,7 @@ Give each shard a zero-padded suffix before building the index:
 ```bash
 tar cf photos-0.tar wedding/   # shard 0
 tar cf photos-1.tar vacation/  # shard 1
+
 itar index create photos.itar  # discovers photos-0.tar, photos-1.tar, ...
 itar index list -l photos.itar # shard index, offsets, byte sizes
 ```
@@ -44,11 +41,6 @@ import itar
 with itar.open("photos.itar") as photos:
     assert "wedding/cake.jpg" in photos
     img_bytes = photos["vacation/sunrise.jpg"].read()
-
-index = itar.index.build(["photos-0.tar", "photos-1.tar"])
-itar.index.create("photos.itar", ["photos-0.tar", "photos-1.tar"])
-
-stored_index = itar.index.load("photos.itar")
 ```
 
 ## CLI reference
@@ -67,3 +59,19 @@ stored_index = itar.index.load("photos.itar")
 - `itar.index.dump(index, path)`: serialize an index you built elsewhere.
 - `itar.index.load(path) -> dict`: load the msgpack index without opening shards.
 - `itar.open(path, *, shards=None, open_fn=None) -> IndexedTarFile`: attach shard handles using an existing index file.
+
+## `itar` File Format
+An `itar` index file is a simple [MessagePack](https://msgpack.org/) dictionary mapping member paths to metadata:
+```python
+{
+    "path/to/member1.jpg": [  # file name
+        null,                 # either null or shard index (0-based)
+        [
+            2048,             # metadata byte offset
+            2560,             # data byte offset
+            1048576,          # file length in bytes
+        ],
+    ],
+    ...
+}
+```
