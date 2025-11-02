@@ -12,23 +12,17 @@ from .utils import (
     tar_file_info,
 )
 
-IndexedTarIndex = dict[str, (int, MemberRecord)]  # fname -> (shard_idx, MemberRecord)
+IndexedTarIndex = dict[
+    str, (int | None, MemberRecord)
+]  # fname -> (shard_idx, MemberRecord)
 Shard = str | os.PathLike | IO[bytes]
-
-
-def _normalize_shards(
-    shards: list[Shard] | Shard,
-) -> tuple[bool, list[Shard], list[bool]]:
-    is_sharded = isinstance(shards, list)
-    normalized = list(shards) if is_sharded else [shards]
-    needs_open = [isinstance(s, (str, os.PathLike)) for s in normalized]
-    return is_sharded, normalized, needs_open
+ShardResolver = Callable[[int | None], Shard]
 
 
 class IndexedTarFile(Mapping):
     def __init__(
         self,
-        shards: list[Shard] | Shard,
+        shards: list[Shard] | Shard | ShardResolver,
         index: IndexedTarIndex,
         open_fn: Callable[[str | os.PathLike], IO[bytes]] = None,
         buffered_file_reader: bool = True,
@@ -36,43 +30,66 @@ class IndexedTarFile(Mapping):
         if index is None:
             raise ValueError("index must be provided")
 
-        _, shards, self._needs_open = _normalize_shards(shards)
         self._file_reader = BufferedReader if buffered_file_reader else lambda x: x
-        open_fn = (
+        self._open_fn = (
             open_fn or ThreadSafeFileIO
         )  # In our benchmarks, `ThreadSafeFileIO` is even faster than `partial(open, mode="rb", buffering=0)`. Likely due to `pread` being fewer syscalls than `seek` + `read`.
-        self._shard_file_objs: list[IO[bytes]] = [
-            open_fn(tar) if needs_open else tar
-            for tar, needs_open in zip(shards, self._needs_open, strict=True)
-        ]
         self._index = index
 
+        self._resolver: ShardResolver
+        self._handles: dict[int | None, IO[bytes]] = {}
+        self._closable: set[int | None] = set()
+
+        if callable(shards):
+            self._resolver = shards  # type: ignore[assignment]
+        else:
+            sources = (
+                {idx: shard for idx, shard in enumerate(shards)}
+                if isinstance(shards, list)
+                else {None: shards}
+            )
+
+            def resolver(idx: int | None) -> Shard:
+                return sources[idx]
+
+            self._resolver = resolver
+
+    def _ensure_shard(self, shard_idx: int | None) -> IO[bytes]:
+        if shard_idx in self._handles:
+            return self._handles[shard_idx]
+
+        source = self._resolver(shard_idx)
+        if isinstance(source, (str, os.PathLike)):
+            handle = self._open_fn(source)
+            self._handles[shard_idx] = handle
+            self._closable.add(shard_idx)
+            return handle
+
+        self._handles[shard_idx] = source
+        return source
+
     def file(self, name: str) -> IO[bytes]:
-        i, member = self._index[name]
+        shard_idx, member = self._index[name]
         _, offset_data, size = member
         if isinstance(size, str):
             return self.file(size)  # symlink or hard link
         return self._file_reader(
-            TarFileSectionIO(self._shard_file_objs[i], offset_data, size)
+            TarFileSectionIO(self._ensure_shard(shard_idx), offset_data, size)
         )
 
     def info(self, name: str) -> TarInfo:
-        i, member = self._index[name]
+        shard_idx, member = self._index[name]
         offset, _, _ = member
-        return tar_file_info(offset, self._shard_file_objs[i])
+        return tar_file_info(offset, self._ensure_shard(shard_idx))
 
     def check_tar_index(self, names: list[str] | None = None):
         for name in names if names is not None else self:
-            i, member = self._index[name]
-            check_tar_index(name, member, self._shard_file_objs[i])
+            shard_idx, member = self._index[name]
+            check_tar_index(name, member, self._ensure_shard(shard_idx))
 
     def close(self):
-        for needed_open, file_obj in zip(
-            self._needs_open, self._shard_file_objs, strict=True
-        ):
-            if needed_open:
-                # only close what we opened
-                file_obj.close()
+        for key in self._closable:
+            self._handles[key].close()
 
     def __enter__(self):
         return self

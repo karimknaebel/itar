@@ -115,7 +115,7 @@ def _resolve_shards_for_create(
         single_tar = Path(single_tar)
         if not single_tar.is_file():
             raise CLIError(f"Single tar not found: {single_tar}")
-        return single_tar, None
+        return single_tar, 1
 
     layout = index.IndexLayout(index_path)
     indexed_shards = layout.discover_shards()
@@ -131,11 +131,11 @@ def _resolve_shards_for_create(
 
     if has_single:
         shards = single_tar_candidate
-        num_shards = None
+        shard_count = 1
     else:
         shards = indexed_shards
-        num_shards = len(shards)
-        if num_shards < 1:
+        shard_count = len(shards)
+        if shard_count < 1:
             raise CLIError(
                 f"No shards found for {index_path}.\n"
                 f"Please create shard files first. Expected pattern: "
@@ -143,12 +143,12 @@ def _resolve_shards_for_create(
                 f"or '{index_path.stem}.tar' for a single shard."
             )
 
-        expected = layout.shards(num_shards)
+        expected = layout.shards(shard_count)
         assert shards == expected, (
             f"Shards do not match expected names: {shards} != {expected}"
         )
 
-    return shards, num_shards
+    return shards, shard_count
 
 
 def _cmd_cat(args) -> None:
@@ -174,13 +174,11 @@ def _cmd_cat(args) -> None:
 
 def _cmd_index_create(args) -> None:
     index_path = Path(args.index)
-    shards, num_shards = _resolve_shards_for_create(
+    shards, shard_count = _resolve_shards_for_create(
         index_path, args.shards, args.single_tar
     )
     index.create(index_path, shards, progress_bar=args.progress)
-    print(
-        f"Wrote index to {index_path} with {1 if num_shards is None else num_shards} shard(s)."
-    )
+    print(f"Wrote index to {index_path} with {shard_count} shard(s).")
 
 
 def _cmd_index_check(args) -> None:
@@ -203,7 +201,7 @@ def _cmd_index_check(args) -> None:
 
 
 def _cmd_ls(args) -> None:
-    _, current_index = index.load(args.index)
+    current_index = index.load(args.index)
     if args.long:
         max_size = 0
         lines = []
@@ -224,15 +222,16 @@ def _cmd_ls(args) -> None:
 
 
 def _cmd_index_list(args) -> None:
-    _, current_index = index.load(args.index)
+    current_index = index.load(args.index)
     if args.long:
         for member, (shard_idx, (offset, offset_data, size)) in current_index.items():
             if not args.bytes:
                 from humanize import naturalsize
 
                 size = naturalsize(size, gnu=True)
+            shard_repr = "-" if shard_idx is None else str(shard_idx)
             print(
-                f"{member:<40} {shard_idx:>5} {offset:>12} {offset_data:>12} {size:>10}"
+                f"{member:<40} {shard_repr:>5} {offset:>12} {offset_data:>12} {size:>10}"
             )
         print(f"{'NAME':<40} {'SHARD':>5} {'OFFSET':>12} {'OFF_DATA':>12} {'SIZE':>10}")
     else:

@@ -105,7 +105,6 @@ class ThreadSafeFileIO(io.RawIOBase):
         self._path = str(path)
         self._fd = os.open(path, os.O_RDONLY)
         self._local = threading.local()
-        self._closed = False
 
     def _get_pos(self) -> int:
         return getattr(self._local, "pos", 0)
@@ -147,9 +146,9 @@ class ThreadSafeFileIO(io.RawIOBase):
         return False
 
     def close(self) -> None:
-        if not self._closed:
+        if not self.closed and hasattr(self, "_fd"):
             os.close(self._fd)
-            self._closed = True
+        super().close()
 
     def fileno(self) -> int:
         return self._fd

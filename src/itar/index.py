@@ -5,12 +5,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import IO, Callable
 
-from .indexed_tar_file import (
-    IndexedTarFile,
-    IndexedTarIndex,
-    Shard,
-    _normalize_shards,
-)
+from .indexed_tar_file import IndexedTarFile, IndexedTarIndex, Shard, ShardResolver
 from .utils import build_tar_index
 
 
@@ -51,10 +46,22 @@ class IndexLayout:
         return candidates
 
 
+def _make_default_resolver(layout: IndexLayout) -> ShardResolver:
+    def resolve(shard_idx: int | None) -> Path:
+        if shard_idx is None:
+            return layout.single_tar()
+
+        shard_paths = layout.discover_shards()
+        return shard_paths[shard_idx]
+
+    return resolve
+
+
 def _build_index_from_fileobjs(
     file_objs: Iterable[IO[bytes]],
     *,
     progress_bar: bool,
+    use_shard_indices: bool,
 ) -> IndexedTarIndex:
     iterator = file_objs
     if progress_bar:
@@ -63,7 +70,7 @@ def _build_index_from_fileobjs(
         iterator = tqdm(file_objs, desc="Building index", unit="shard")
 
     return {
-        name: (i, member)
+        name: ((i if use_shard_indices else None), member)
         for i, file_obj in enumerate(iterator)
         for name, member in build_tar_index(file_obj).items()
     }
@@ -75,50 +82,48 @@ def build(
     progress_bar: bool = False,
 ) -> IndexedTarIndex:
     """Build an index mapping without instantiating ``IndexedTarFile``."""
+    is_sharded = isinstance(shards, list)
+    if not is_sharded:
+        shards = [shards]
+    needs_open = [isinstance(s, (str, os.PathLike)) for s in shards]
 
-    _, shard_list, needs_open = _normalize_shards(shards)
     file_objs: list[IO[bytes]] = [
         builtins.open(tar, "rb") if needs else tar
-        for tar, needs in zip(shard_list, needs_open, strict=True)
+        for tar, needs in zip(shards, needs_open, strict=True)
     ]
     try:
-        return _build_index_from_fileobjs(file_objs, progress_bar=progress_bar)
+        return _build_index_from_fileobjs(
+            file_objs,
+            progress_bar=progress_bar,
+            use_shard_indices=is_sharded,
+        )
     finally:
         for needs, file_obj in zip(needs_open, file_objs, strict=True):
             if needs:
                 file_obj.close()
 
 
-def load(path: str | os.PathLike) -> tuple[int | None, IndexedTarIndex]:
-    """Load an index dictionary and shard count from a saved ``.itar`` index file."""
+def load(path: str | os.PathLike) -> IndexedTarIndex:
+    """Load an index dictionary from a saved ``.itar`` index file."""
 
     import msgpack
 
     path = Path(path)
     with builtins.open(path, "rb") as f:
-        num_shards, index = msgpack.load(f)
-    return num_shards, index
+        return msgpack.load(f)
 
 
-def save(
-    path: str | os.PathLike,
-    num_shards: int | None,
+def dump(
     index: IndexedTarIndex,
+    path: str | os.PathLike,
 ) -> None:
-    """Persist ``(num_shards, index)`` to disk in msgpack format."""
+    """Persist ``index`` to disk in msgpack format."""
 
     import msgpack
 
     path = Path(path)
     with builtins.open(path, "wb") as f:
-        msgpack.dump((num_shards, index), f)
-
-
-def _infer_default_shards(path: Path, num_shards: int | None) -> list[Shard] | Shard:
-    layout = IndexLayout(path)
-    if num_shards is None:
-        return layout.single_tar()
-    return layout.shards(num_shards)
+        msgpack.dump(index, f)
 
 
 def open(
@@ -130,10 +135,13 @@ def open(
     """Open an :class:`IndexedTarFile` using an on-disk index file."""
 
     path = Path(path)
-    num_shards, index = load(path)
-    resolved_shards = (
-        shards if shards is not None else _infer_default_shards(path, num_shards)
-    )
+    index = load(path)
+    layout = IndexLayout(path)
+    resolved_shards: list[Shard] | Shard | ShardResolver
+    if shards is not None:
+        resolved_shards = shards
+    else:
+        resolved_shards = _make_default_resolver(layout)
     return IndexedTarFile(
         resolved_shards,
         index=index,
@@ -151,9 +159,7 @@ def create(
     """Build an index for ``shards`` and save it to ``path``."""
 
     index = build(shards, progress_bar=progress_bar)
-    is_sharded, normalized, _ = _normalize_shards(shards)
-    num_shards = len(normalized) if is_sharded else None
-    save(path, num_shards, index)
+    dump(index, path)
     return index
 
 
@@ -163,5 +169,5 @@ __all__ = [
     "create",
     "load",
     "open",
-    "save",
+    "dump",
 ]

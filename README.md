@@ -24,7 +24,7 @@ with itar.open("hello.itar") as archive:
 # If you just need the index dictionary without opening handles:
 index = itar.index.build("hello.tar")
 # Write the index file to disk:
-itar.index.save("hello.itar", num_shards=None, index=index)
+itar.index.dump(index, "hello.itar")
 ```
 
 ## Quickstart (sharded tarballs)
@@ -48,7 +48,7 @@ with itar.open("photos.itar") as photos:
 index = itar.index.build(["photos-0.tar", "photos-1.tar"])
 itar.index.create("photos.itar", ["photos-0.tar", "photos-1.tar"])
 
-num_shards, stored_index = itar.index.load("photos.itar")
+stored_index = itar.index.load("photos.itar")
 ```
 
 ## CLI reference
@@ -64,6 +64,6 @@ num_shards, stored_index = itar.index.load("photos.itar")
 
 - `itar.index.build(shards, progress_bar=False) -> dict`: construct an index mapping for paths, file objects, or buffers.
 - `itar.index.create("archive.itar", shards)`: convenience wrapper that builds + saves an index file.
-- `itar.index.save(path, num_shards, index)`: serialize an index you built elsewhere.
-- `itar.index.load(path) -> (num_shards, index)`: load the msgpack index without opening shards.
+- `itar.index.dump(index, path)`: serialize an index you built elsewhere.
+- `itar.index.load(path) -> dict`: load the msgpack index without opening shards.
 - `itar.open(path, *, shards=None, open_fn=None) -> IndexedTarFile`: attach shard handles using an existing index file.

@@ -379,10 +379,12 @@ def test_indexed_tar_file_open_and_save(tmp_path, sharded_tar_and_files):
     itar.index.create(index_path, shard_paths)
 
     # Check that the saved file exists and is a valid msgpack file
-    num_shards, index = itar.index.load(index_path)
-    assert num_shards == len(shard_paths)
-    assert isinstance(index, dict)
-    assert set(index.keys()) == set(f for files in files_ls for f in files)
+    index_mapping = itar.index.load(index_path)
+    assert isinstance(index_mapping, dict)
+    assert set(index_mapping.keys()) == set(f for files in files_ls for f in files)
+    assert {shard_idx for shard_idx, _ in index_mapping.values()} == set(
+        range(len(shard_paths))
+    )
 
     # Open the archive using the classmethod and check contents
     archive2 = itar.open(index_path)
@@ -410,9 +412,9 @@ def test_single_shard_basename_roundtrip(tmp_path):
     index_path = tmp_path / "archive.itar"
     itar.index.create(index_path, tar_path)
 
-    num_shards, index = itar.index.load(index_path)
-    assert num_shards is None
-    assert set(index.keys()) == set(files.keys())
+    index_mapping = itar.index.load(index_path)
+    assert set(index_mapping.keys()) == set(files.keys())
+    assert {shard_idx for shard_idx, _ in index_mapping.values()} == {None}
 
     with itar.open(index_path) as reopened:
         for name, content in files.items():
@@ -420,17 +422,38 @@ def test_single_shard_basename_roundtrip(tmp_path):
                 assert fh.read() == content
 
 
-def test_single_input_bytesio_save(tmp_path):
+def test_single_shard_with_suffix(tmp_path):
+    files = {"foo.txt": b"foo"}
+    layout = itar.index.IndexLayout(tmp_path / "archive.itar")
+    shard_path = layout.shard(0, 1)
+    with tarfile.open(shard_path, "w") as tf:
+        for name, data in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+
+    index_path = tmp_path / "archive.itar"
+    itar.index.create(index_path, [shard_path])
+
+    index_mapping = itar.index.load(index_path)
+    assert {shard_idx for shard_idx, _ in index_mapping.values()} == {0}
+
+    with itar.open(index_path) as reopened:
+        with reopened["foo.txt"] as fh:
+            assert fh.read() == b"foo"
+
+
+def test_single_input_bytesio_dump(tmp_path):
     files = {"only.txt": b"payload"}
     tar_buf = make_tar_bytes(files)
 
     index_path = tmp_path / "single.itar"
     index = itar.index.build(tar_buf)
-    itar.index.save(index_path, num_shards=None, index=index)
+    itar.index.dump(index, index_path)
 
-    num_shards, index = itar.index.load(index_path)
-    assert num_shards is None
-    assert set(index) == set(files)
+    index_mapping = itar.index.load(index_path)
+    assert set(index_mapping) == set(files)
+    assert {shard_idx for shard_idx, _ in index_mapping.values()} == {None}
 
 
 def test_open_with_explicit_shards_override(tmp_path):
@@ -455,9 +478,8 @@ def test_open_with_explicit_shards_override(tmp_path):
 
     reopened = itar.open(index_path, shards=[tar_path])
     try:
-        assert set(reopened.keys()) == set(files)
-        with reopened["foo.txt"] as f:
-            assert f.read() == b"foo"
+        with pytest.raises(KeyError):
+            reopened["foo.txt"]
     finally:
         reopened.close()
 
@@ -475,9 +497,9 @@ def test_create_detects_single_tar(tmp_path):
         SimpleNamespace(index=index_path, shards=None, single_tar=None, progress=True)
     )
 
-    num_shards, index = itar.index.load(index_path)
-    assert num_shards is None
-    assert set(index.keys()) == set(files)
+    index_mapping = itar.index.load(index_path)
+    assert set(index_mapping.keys()) == set(files)
+    assert {shard_idx for shard_idx, _ in index_mapping.values()} == {None}
 
     with itar.open(index_path) as reopened:
         with reopened["foo.txt"] as fh:
@@ -501,9 +523,12 @@ def test_create_detects_sharded(tmp_path):
         SimpleNamespace(index=index_path, shards=None, single_tar=None, progress=True)
     )
 
-    num_shards, index = itar.index.load(index_path)
-    assert num_shards == len(shard_data)
-    assert set(index.keys()) == {"foo.txt", "bar.txt"}
+    index_mapping = itar.index.load(index_path)
+    assert {shard_idx for shard_idx, _ in index_mapping.values()} == set(
+        range(len(shard_data))
+    )
+    assert set(index_mapping.keys()) == {"foo.txt", "bar.txt"}
 
     with itar.open(index_path) as reopened:
         assert set(reopened.keys()) == {"foo.txt", "bar.txt"}
+
