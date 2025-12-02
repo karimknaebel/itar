@@ -46,15 +46,16 @@ class IndexLayout:
         return candidates
 
 
-def _make_default_resolver(layout: IndexLayout) -> ShardResolver:
-    def resolve(shard_idx: int | None) -> Path:
+class DefaultResolver:
+    def __init__(self, layout: IndexLayout):
+        self.layout = layout
+
+    def __call__(self, shard_idx: int | None) -> Path:
         if shard_idx is None:
-            return layout.single_tar()
+            return self.layout.single_tar()
 
-        shard_paths = layout.discover_shards()
+        shard_paths = self.layout.discover_shards()
         return shard_paths[shard_idx]
-
-    return resolve
 
 
 def _build_index_from_fileobjs(
@@ -141,7 +142,7 @@ def open(
     if shards is not None:
         resolved_shards = shards
     else:
-        resolved_shards = _make_default_resolver(layout)
+        resolved_shards = DefaultResolver(layout)
     return IndexedTarFile(
         resolved_shards,
         index=index,
