@@ -20,6 +20,29 @@ ShardResolver = Callable[[int | None], Shard]
 
 
 class IndexedTarFile(Mapping):
+    """
+    Read-only mapping that serves members out of indexed tar shards.
+
+    Args:
+        shards: Shard sources (single tar, list of tars, or resolver callable).
+        index: Precomputed index mapping member names to offsets.
+        open_fn: Optional callable to open paths; defaults to a thread-safe file reader.
+        buffered_file_reader: Wrap member streams in a buffered reader when True.
+
+    Use ``itar.open`` to construct this class. It supports the mapping protocol
+    for read access (``archive["path/to/file"]``) and should be used as a
+    context manager to close any open file handles.
+
+    Example:
+        ```python
+        import itar
+
+        with itar.open("photos.itar") as archive:
+            jpg = archive["vacation/sunrise.jpg"].read()
+            assert "wedding/cake.jpg" in archive
+        ```
+    """
+
     def __init__(
         self,
         shards: list[Shard] | Shard | ShardResolver,
@@ -69,6 +92,7 @@ class IndexedTarFile(Mapping):
         return source
 
     def file(self, name: str) -> IO[bytes]:
+        """Return a readable file-like object for an indexed member."""
         shard_idx, member = self._index[name]
         _, offset_data, size = member
         if isinstance(size, str):
@@ -78,11 +102,13 @@ class IndexedTarFile(Mapping):
         )
 
     def info(self, name: str) -> TarInfo:
+        """Return the ``TarInfo`` for an indexed member without reading data."""
         shard_idx, member = self._index[name]
         offset, _, _ = member
         return tar_file_info(offset, self._ensure_shard(shard_idx))
 
     def check_tar_index(self, names: list[str] | None = None):
+        """Validate stored offsets for the given names (or all members)."""
         for name in names if names is not None else self:
             shard_idx, member = self._index[name]
             check_tar_index(name, member, self._ensure_shard(shard_idx))

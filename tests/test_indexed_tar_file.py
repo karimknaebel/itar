@@ -531,4 +531,3 @@ def test_create_detects_sharded(tmp_path):
 
     with itar.open(index_path) as reopened:
         assert set(reopened.keys()) == {"foo.txt", "bar.txt"}
-

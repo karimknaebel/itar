@@ -1,0 +1,51 @@
+[project]
+site_name = "itar"
+site_description = "Constant-time tar indexes with a lightweight CLI and Python helpers."
+site_author = "Karim Abou Zeid"
+repo_url = "https://github.com/kabouzeid/itar"
+repo_name = "kabouzeid/itar"
+edit_uri = "edit/main/docs/"
+nav = [
+  { "Overview" = "index.md" },
+  { "CLI" = "cli.md" },
+  { "Python API" = "api.md" },
+  { "File Format" = "format.md" },
+]
+
+[project.theme]
+language = "en"
+
+[[project.theme.palette]]
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[project.theme.font]
+text = "Inter"
+code = "Jetbrains Mono"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/kabouzeid"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/python"
+link = "https://pypi.org/project/itar"
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+inventories = ["https://docs.python.org/3/objects.inv"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+inherited_members = true
+show_source = false
+separate_signature= true
+show_signature_annotations= true
+members_order= "__all__"
+docstring_section_style = "spacy"

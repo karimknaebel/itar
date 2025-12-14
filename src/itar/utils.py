@@ -11,6 +11,7 @@ MemberRecord = tuple[int, int, int | str]  # (offset, offset_data, size | linkna
 
 
 def tar_file_info(offset: int, file_obj: IO[bytes]) -> TarInfo:
+    """Return a ``TarInfo`` for the member starting at ``offset``."""
     file_obj.seek(offset)
     return TarInfo.fromtarfile(
         # want to avoid creating a new TarFile instance (potentially slow)
@@ -43,6 +44,7 @@ def tarinfo2member(tarinfo: TarInfo) -> MemberRecord:
 def build_tar_index(
     tar: str | os.PathLike | IO[bytes] | TarFile,
 ) -> dict[str, MemberRecord]:
+    """Collect offsets and sizes for all files and links in a tar archive."""
     if isinstance(tar, str | os.PathLike):
         tar = tarfile.open(tar, "r:")
     elif isinstance(tar, TarFile):
@@ -77,6 +79,7 @@ def check_tar_index(
     tar_offset: MemberRecord,
     file_obj: IO[bytes],
 ):
+    """Confirm that ``tar_offset`` matches the member on disk."""
     offset, offset_data, size = tar_offset
     info = tar_file_info(offset, file_obj)
     if (
@@ -165,6 +168,8 @@ class ThreadSafeFileIO(io.RawIOBase):
 
 
 class TarFileSectionIO(io.RawIOBase):
+    """A read-only view over a byte range inside a larger file object."""
+
     def __init__(self, fileobj: BinaryIO, offset: int, size: int):
         self._fileobj = fileobj
         self._start = offset

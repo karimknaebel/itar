@@ -47,6 +47,8 @@ class IndexLayout:
 
 
 class DefaultResolver:
+    """Resolve shard indices to paths next to an existing index file."""
+
     def __init__(self, layout: IndexLayout):
         self.layout = layout
 
@@ -133,7 +135,7 @@ def open(
     open_fn: Callable[[str | os.PathLike], IO[bytes]] | None = None,
     buffered_file_reader: bool = True,
 ) -> IndexedTarFile:
-    """Open an :class:`IndexedTarFile` using an on-disk index file."""
+    """Open an ``IndexedTarFile`` using an on-disk index file."""
 
     path = Path(path)
     index = load(path)
@@ -165,10 +167,10 @@ def create(
 
 
 __all__ = [
-    "IndexLayout",
-    "build",
     "create",
-    "load",
     "open",
+    "build",
     "dump",
+    "load",
+    "IndexLayout",
 ]

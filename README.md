@@ -1,6 +1,7 @@
 # itar
 
-[![image](https://img.shields.io/pypi/v/itar.svg)](https://pypi.python.org/pypi/itar)
+[![PyPI version](https://img.shields.io/pypi/v/itar.svg)](https://pypi.python.org/pypi/itar)
+[![docs](https://img.shields.io/badge/docs-brightgreen.svg)](https://kabouzeid.github.io/itar/)
 
 `itar` builds constant‑time indexes over one or more tar file shards, enabling direct, random access to members without extracting the archives. It ships a lightweight CLI (`itar`) and a Python API.
 
@@ -49,35 +50,6 @@ with itar.open("photos.itar") as photos:
     img_bytes = photos["vacation/sunrise.jpg"].read()
 ```
 
-## CLI reference
+## Docs
 
-| Command | Purpose |
-| --- | --- |
-| `itar index create <archive>.itar [--single TAR \| --shards shard0.tar shard1.tar ...]` | Indexes a single archive or an explicit set of shards. With no flags, shards are auto-discovered next to `<archive>.itar`. |
-| `itar index list <archive>.itar` | Lists members. Use `-l` for shard/offset info and `-H` for human-readable sizes. |
-| `itar index check <archive>.itar` | Validates recorded entries; add `--member NAME` to focus on specific files. |
-| `itar cat <archive>.itar <member>` | Streams a member’s bytes to stdout. |
-
-## Python helpers
-
-- `itar.index.build(shards, progress_bar=False) -> dict`: construct an index mapping for paths, file objects, or buffers.
-- `itar.index.create("archive.itar", shards)`: convenience wrapper that builds + saves an index file.
-- `itar.index.dump(index, path)`: serialize an index you built elsewhere.
-- `itar.index.load(path) -> dict`: load the msgpack index without opening shards.
-- `itar.open(path, *, shards=None, open_fn=None) -> IndexedTarFile`: attach shard handles using an existing index file.
-
-## `itar` File Format
-An `itar` index file is a simple [MessagePack](https://msgpack.org/) dictionary mapping member paths to metadata:
-```python
-{
-    "path/to/member1.jpg": [  # file name
-        null,                 # either null or shard index (0-based)
-        [
-            2048,             # metadata byte offset
-            2560,             # data byte offset
-            1048576,          # file length in bytes
-        ],
-    ],
-    ...
-}
-```
+Full CLI, API, and format details live in the [documentation site](https://kabouzeid.github.io/itar).
