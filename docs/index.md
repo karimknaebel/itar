@@ -11,7 +11,7 @@ Constant-time indexes for single or sharded tar archives. Build an index once, t
 Install the CLI (includes the Python API):
 
 ```bash
-pip install itar[cli]
+pip install itar
 ```
 
 ### Single tarball

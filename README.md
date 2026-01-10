@@ -10,7 +10,7 @@ Designed for large datasets and deep‑learning pipelines, it supports single or
 ## Quickstart
 
 ```bash
-pip install itar[cli]
+pip install itar
 ```
 
 ### Single tarball

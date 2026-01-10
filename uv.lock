@@ -91,12 +91,8 @@ name = "itar"
 version = "0.4.1"
 source = { editable = "." }
 dependencies = [
-    { name = "msgpack" },
-]
-
-[package.optional-dependencies]
-cli = [
     { name = "humanize" },
+    { name = "msgpack" },
     { name = "tqdm" },
 ]
 
@@ -110,11 +106,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "humanize", marker = "extra == 'cli'", specifier = ">=4.12.3" },
+    { name = "humanize", specifier = ">=4.12.3" },
     { name = "msgpack", specifier = ">=1.1.1" },
-    { name = "tqdm", marker = "extra == 'cli'", specifier = ">=4.67.1" },
+    { name = "tqdm", specifier = ">=4.67.1" },
 ]
-provides-extras = ["cli"]
 
 [package.metadata.requires-dev]
 dev = [
