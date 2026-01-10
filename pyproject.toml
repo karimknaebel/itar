@@ -1,6 +1,6 @@
 [project]
 name = "itar"
-version = "0.4.1"
+version = "0.4.2"
 description = "tar file index for constant-time member access"
 readme = "README.md"
 authors = [
