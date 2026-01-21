@@ -43,11 +43,13 @@ itar index list -l photos.itar  # shard index, offsets, byte sizes
 ```
 
 ```python
+from PIL import Image
 import itar
 
 with itar.open("photos.itar") as photos:
     assert "wedding/cake.jpg" in photos
-    img_bytes = photos["vacation/sunrise.jpg"].read()
+    with Image.open(photos["vacation/sunrise.jpg"]) as img:
+        print(img.size)
 ```
 
 ## Docs
