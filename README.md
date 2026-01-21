@@ -1,7 +1,7 @@
 # itar
 
 [![PyPI version](https://img.shields.io/pypi/v/itar.svg)](https://pypi.python.org/pypi/itar)
-[![docs](https://img.shields.io/badge/docs-brightgreen.svg)](https://kabouzeid.github.io/itar/)
+[![docs](https://img.shields.io/badge/docs-brightgreen.svg)](https://karimknaebel.github.io/itar/)
 
 `itar` builds constant‑time indexes over one or more tar file shards, enabling direct, random access to members without extracting the archives. It ships a lightweight CLI (`itar`) and a Python API.
 
@@ -54,4 +54,4 @@ with itar.open("photos.itar") as photos:
 
 ## Docs
 
-Full CLI, API, and format details live in the [documentation site](https://kabouzeid.github.io/itar).
+Full CLI, API, and format details live in the [documentation site](https://karimknaebel.github.io/itar).
