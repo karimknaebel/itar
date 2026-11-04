@@ -51,13 +51,15 @@ class DefaultResolver:
 
     def __init__(self, layout: IndexLayout):
         self.layout = layout
+        self._shards: list[Path] | None = None
 
     def __call__(self, shard_idx: int | None) -> Path:
         if shard_idx is None:
             return self.layout.single_tar()
 
-        shard_paths = self.layout.discover_shards()
-        return shard_paths[shard_idx]
+        if self._shards is None:
+            self._shards = self.layout.discover_shards()
+        return self._shards[shard_idx]
 
 
 def _build_index_from_fileobjs(
