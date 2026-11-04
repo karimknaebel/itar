@@ -93,7 +93,7 @@ def main() -> None:
     args = parser.parse_args()
     try:
         args.func(args)
-    except CLIError as exc:
+    except (CLIError, index.DuplicateShardError) as exc:
         print(exc, file=sys.stderr)
         sys.exit(1)
 
@@ -125,7 +125,7 @@ def _resolve_shards_for_create(
 
     if has_single and has_indexed:
         raise CLIError(
-            "Found both single (`name.tar`) and sharded (`name-NN.tar`) archives. "
+            "Found both single (`name.tar`) and sharded (`name-ID.tar`) archives. "
             "Please remove one convention before building the index."
         )
 
@@ -139,14 +139,9 @@ def _resolve_shards_for_create(
             raise CLIError(
                 f"No shards found for {index_path}.\n"
                 f"Please create shard files first. Expected pattern: "
-                f"'{index_path.stem}-NN.tar' (zero-padded shard index starting from 0) "
+                f"'{index_path.stem}-ID.tar' (nonnegative decimal shard ID) "
                 f"or '{index_path.stem}.tar' for a single shard."
             )
-
-        expected = layout.shards(shard_count)
-        assert shards == expected, (
-            f"Shards do not match expected names: {shards} != {expected}"
-        )
 
     return shards, shard_count
 

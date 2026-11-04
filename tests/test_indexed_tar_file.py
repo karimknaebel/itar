@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import itar
-from itar.cli import _cmd_cat, _cmd_index_create
+from itar.cli import _cmd_cat, _cmd_index_create, main
 from itar.indexed_tar_file import IndexedTarFile
 from itar.utils import TarIndexError, build_tar_index
 
@@ -401,6 +401,100 @@ def test_indexed_tar_file_open_and_save(tmp_path, sharded_tar_and_files):
     archive3.close()
 
 
+@pytest.mark.parametrize("missing_shard", [0, 1, 2])
+def test_open_with_missing_shard(tmp_path, missing_shard):
+    index_path = tmp_path / "archive.itar"
+    shards = [tmp_path / f"archive-{i}.tar" for i in range(3)]
+    for i, path in enumerate(shards):
+        path.write_bytes(make_tar_bytes({f"{i}.txt": str(i).encode()}).getvalue())
+    itar.index.create(index_path, shards, progress_bar=False)
+    shards[missing_shard].unlink()
+
+    with itar.open(index_path) as archive:
+        with pytest.raises(FileNotFoundError, match=f"Shard {missing_shard}"):
+            archive[f"{missing_shard}.txt"]
+        for i in range(3):
+            if i != missing_shard:
+                with archive[f"{i}.txt"] as member:
+                    assert member.read() == str(i).encode()
+
+
+def test_default_resolver_uses_numeric_suffixes(tmp_path):
+    layout = itar.index.IndexLayout(tmp_path / "my-archive.itar")
+    for suffix in ["1", "02", "10"]:
+        (tmp_path / f"my-archive-{suffix}.tar").touch()
+
+    resolver = itar.index.DefaultResolver(layout)
+    assert resolver(1) == tmp_path / "my-archive-1.tar"
+    assert resolver(2) == tmp_path / "my-archive-02.tar"
+    assert resolver(10) == tmp_path / "my-archive-10.tar"
+
+
+def test_default_resolver_rejects_duplicate_shard_indices(tmp_path):
+    (tmp_path / "archive-0.tar").touch()
+    (tmp_path / "archive-00.tar").touch()
+    resolver = itar.index.DefaultResolver(
+        itar.index.IndexLayout(tmp_path / "archive.itar")
+    )
+
+    with pytest.raises(ValueError, match="Duplicate shard ID 0") as exc:
+        resolver(0)
+    assert "archive-0.tar" in str(exc.value)
+    assert "archive-00.tar" in str(exc.value)
+
+
+@pytest.mark.parametrize("command", [["index", "create"], ["index", "check"], ["cat"]])
+def test_cli_rejects_duplicate_shard_ids(tmp_path, monkeypatch, capsys, command):
+    index_path = tmp_path / "archive.itar"
+    shard_path = tmp_path / "archive-0.tar"
+    shard_path.write_bytes(make_tar_bytes({"foo.txt": b"foo"}).getvalue())
+    itar.index.create(index_path, [shard_path], progress_bar=False)
+    (tmp_path / "archive-00.tar").touch()
+    monkeypatch.setattr(
+        "sys.argv",
+        ["itar", *command, str(index_path)]
+        + (["foo.txt"] if command == ["cat"] else []),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 1
+    error = capsys.readouterr().err
+    assert "Duplicate shard ID 0" in error
+    assert "archive-0.tar" in error
+    assert "archive-00.tar" in error
+
+
+def test_discover_shards_matches_literal_stem_and_decimal_ids(tmp_path):
+    for name in ["photos[1]-7.tar", "photos[1]-002.tar", "photos[1]-10.tar"]:
+        (tmp_path / name).touch()
+    for name in [
+        "photos1-3.tar",
+        "photos[1]--3.tar",
+        "photos[1]-x.tar",
+        "photos[1]-3.tar.gz",
+    ]:
+        (tmp_path / name).touch()
+    (tmp_path / "photos[1]-4.tar").mkdir()
+
+    shards = itar.index.IndexLayout(tmp_path / "photos[1].itar").discover_shards()
+    assert list(shards) == [2, 7, 10]
+    assert shards[2] == tmp_path / "photos[1]-002.tar"
+
+
+def test_explicit_shard_ids_roundtrip(tmp_path):
+    shards = {7: make_tar_bytes({"a.txt": b"a"}), 42: make_tar_bytes({"b.txt": b"b"})}
+    index_path = tmp_path / "archive.itar"
+    itar.index.create(index_path, shards, progress_bar=False)
+
+    with itar.open(index_path, shards=shards) as archive:
+        with archive["a.txt"] as member:
+            assert member.read() == b"a"
+        with archive["b.txt"] as member:
+            assert member.read() == b"b"
+    assert all(not shard.closed for shard in shards.values())
+
+
 def test_single_shard_basename_roundtrip(tmp_path):
     files = {"foo.txt": b"hello", "dir/bar.txt": b"world"}
     tar_buf = make_tar_bytes(files)
@@ -425,8 +519,7 @@ def test_single_shard_basename_roundtrip(tmp_path):
 
 def test_single_shard_with_suffix(tmp_path):
     files = {"foo.txt": b"foo"}
-    layout = itar.index.IndexLayout(tmp_path / "archive.itar")
-    shard_path = layout.shard(0, 1)
+    shard_path = tmp_path / "archive-0.tar"
     with tarfile.open(shard_path, "w") as tf:
         for name, data in files.items():
             info = tarfile.TarInfo(name)
@@ -525,15 +618,15 @@ def test_create_detects_single_tar(tmp_path):
             assert fh.read() == b"foo"
 
 
-def test_create_detects_sharded(tmp_path):
+@pytest.mark.parametrize("suffixes", [("0", "1"), ("0007", "42"), ("10", "002")])
+def test_create_detects_sharded(tmp_path, suffixes):
     files_a = {"foo.txt": b"foo"}
     files_b = {"bar.txt": b"bar"}
     shard_data = [files_a, files_b]
 
-    for idx, mapping in enumerate(shard_data):
+    for suffix, mapping in zip(suffixes, shard_data, strict=True):
         buf = make_tar_bytes(mapping)
-        layout = itar.index.IndexLayout(tmp_path / "archive.itar")
-        shard_path = layout.shard(idx, len(shard_data))
+        shard_path = tmp_path / f"archive-{suffix}.tar"
         with open(shard_path, "wb") as f:
             f.write(buf.getbuffer())
 
@@ -543,10 +636,13 @@ def test_create_detects_sharded(tmp_path):
     )
 
     index_mapping = itar.index.load(index_path)
-    assert {shard_idx for shard_idx, _ in index_mapping.values()} == set(
-        range(len(shard_data))
-    )
+    assert index_mapping["foo.txt"][0] == int(suffixes[0])
+    assert index_mapping["bar.txt"][0] == int(suffixes[1])
     assert set(index_mapping.keys()) == {"foo.txt", "bar.txt"}
 
     with itar.open(index_path) as reopened:
         assert set(reopened.keys()) == {"foo.txt", "bar.txt"}
+        for mapping in shard_data:
+            for name, data in mapping.items():
+                with reopened[name] as member:
+                    assert member.read() == data

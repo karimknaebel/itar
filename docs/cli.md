@@ -17,12 +17,22 @@ icon: lucide/terminal
 
 ## Shard naming
 
-For sharded datasets, name shards with a zero-padded suffix before building the index:
+For `photos.itar`, place shards named `photos-<ID>.tar` in the same directory.
+`ID` is a nonnegative decimal integer. Leading zeros do not affect its value:
+`photos-7.tar` and `photos-0007.tar` both identify shard 7. IDs may have gaps and
+need not start at zero. Each numeric ID must be unique; duplicate IDs are an error
+when creating or reading an index through autodiscovery.
 
 ```bash
-tar cf photos-0.tar wedding/
-tar cf photos-1.tar vacation/
+tar cf photos-0007.tar wedding/
+tar cf photos-42.tar vacation/
 itar index create photos.itar
 ```
 
-The index is saved as `photos.itar`, alongside `photos-0.tar`, `photos-1.tar`, etc.
+The index records shard IDs 7 and 42. Missing shards do not change the IDs of the
+remaining files; accessing a missing shard raises `FileNotFoundError`.
+
+With `--shards`, filenames are unrestricted and shard IDs are assigned by list
+position starting at zero. Reopen such an index with the same ordered shard list
+using `itar.open(..., shards=[...])` unless its filenames already match those IDs
+and the index basename.

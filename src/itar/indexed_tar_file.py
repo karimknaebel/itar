@@ -24,7 +24,7 @@ class IndexedTarFile(Mapping):
     Read-only mapping that serves members out of indexed tar shards.
 
     Args:
-        shards: Shard sources (single tar, list of tars, or resolver callable).
+        shards: A single TAR, a list, a dictionary keyed by shard ID, or a resolver.
         index: Precomputed index mapping member names to offsets.
         open_fn: Optional callable to open paths; defaults to a thread-safe file reader.
         buffered_file_reader: Wrap member streams in a buffered reader when True.
@@ -45,7 +45,7 @@ class IndexedTarFile(Mapping):
 
     def __init__(
         self,
-        shards: list[Shard] | Shard | ShardResolver,
+        shards: dict[int, Shard] | list[Shard] | Shard | ShardResolver,
         index: IndexedTarIndex,
         open_fn: Callable[[str | os.PathLike], IO[bytes]] = None,
         buffered_file_reader: bool = True,
@@ -66,11 +66,12 @@ class IndexedTarFile(Mapping):
         if callable(shards):
             self._resolver = shards  # type: ignore[assignment]
         else:
-            sources = (
-                {idx: shard for idx, shard in enumerate(shards)}
-                if isinstance(shards, list)
-                else {None: shards}
-            )
+            if isinstance(shards, dict):
+                sources = dict(shards)
+            elif isinstance(shards, list):
+                sources = dict(enumerate(shards))
+            else:
+                sources = {None: shards}
 
             def resolver(idx: int | None) -> Shard:
                 return sources[idx]

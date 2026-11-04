@@ -32,7 +32,9 @@ with itar.open("hello.itar") as archive:
 
 ### Sharded tarballs
 
-Give each shard a zero-padded suffix before building the index:
+Name shards `<archive>-<ID>.tar`, where `ID` is a nonnegative decimal integer.
+Leading zeros are optional, IDs need not be consecutive or start at zero, and
+duplicate numeric IDs are rejected.
 
 ```bash
 tar cf photos-0.tar wedding/    # shard 0

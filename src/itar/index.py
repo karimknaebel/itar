@@ -9,6 +9,10 @@ from .indexed_tar_file import IndexedTarFile, IndexedTarIndex, Shard, ShardResol
 from .utils import build_tar_index
 
 
+class DuplicateShardError(ValueError):
+    pass
+
+
 class IndexLayout:
     """Naming helpers for the TAR shards backing an index file."""
 
@@ -26,24 +30,20 @@ class IndexLayout:
     def single_tar(self) -> Path:
         return self._index_path.with_suffix(".tar")
 
-    def shard(self, shard_idx: int, total_shards: int) -> Path:
-        if total_shards <= 0:
-            raise ValueError("total_shards must be positive")
-        width = max(1, len(str(total_shards - 1)))
-        return self._index_path.parent / f"{self.stem}-{shard_idx:0{width}d}.tar"
-
-    def shards(self, total_shards: int) -> list[Path]:
-        return [self.shard(i, total_shards) for i in range(total_shards)]
-
-    def discover_shards(self) -> list[Path]:
-        pattern = re.compile(rf"^{re.escape(self.stem)}-\d+\.tar$")
-        candidates = [
-            path
-            for path in self._index_path.parent.glob(f"{self.stem}-*.tar")
-            if path.is_file() and pattern.match(path.name)
-        ]
-        candidates.sort()
-        return candidates
+    def discover_shards(self) -> dict[int, Path]:
+        pattern = re.compile(rf"{re.escape(self.stem)}-([0-9]+)\.tar")
+        shards = {}
+        for path in self._index_path.parent.iterdir():
+            match = pattern.fullmatch(path.name)
+            if match is None or not path.is_file():
+                continue
+            idx = int(match[1])
+            if idx in shards:
+                raise DuplicateShardError(
+                    f"Duplicate shard ID {idx}: {shards[idx]} and {path}"
+                )
+            shards[idx] = path
+        return dict(sorted(shards.items()))
 
 
 class DefaultResolver:
@@ -51,7 +51,7 @@ class DefaultResolver:
 
     def __init__(self, layout: IndexLayout):
         self.layout = layout
-        self._shards: list[Path] | None = None
+        self._shards: dict[int, Path] | None = None
 
     def __call__(self, shard_idx: int | None) -> Path:
         if shard_idx is None:
@@ -59,14 +59,19 @@ class DefaultResolver:
 
         if self._shards is None:
             self._shards = self.layout.discover_shards()
-        return self._shards[shard_idx]
+
+        try:
+            return self._shards[shard_idx]
+        except KeyError:
+            raise FileNotFoundError(
+                f"Shard {shard_idx} not found for {self.layout.index_path}"
+            ) from None
 
 
 def _build_index_from_fileobjs(
-    file_objs: Iterable[IO[bytes]],
+    file_objs: Iterable[tuple[int | None, IO[bytes]]],
     *,
     progress_bar: bool,
-    use_shard_indices: bool,
 ) -> IndexedTarIndex:
     iterator = file_objs
     if progress_bar:
@@ -75,35 +80,37 @@ def _build_index_from_fileobjs(
         iterator = tqdm(file_objs, desc="Building index", unit="shard")
 
     return {
-        name: ((i if use_shard_indices else None), member)
-        for i, file_obj in enumerate(iterator)
+        name: (i, member)
+        for i, file_obj in iterator
         for name, member in build_tar_index(file_obj).items()
     }
 
 
 def build(
-    shards: list[Shard] | Shard,
+    shards: dict[int, Shard] | list[Shard] | Shard,
     *,
     progress_bar: bool = False,
 ) -> IndexedTarIndex:
-    """Build an index mapping without instantiating ``IndexedTarFile``."""
-    is_sharded = isinstance(shards, list)
-    if not is_sharded:
-        shards = [shards]
-    needs_open = [isinstance(s, (str, os.PathLike)) for s in shards]
+    """Build an index using dictionary IDs, list positions, or a single TAR."""
+    if isinstance(shards, dict):
+        sources = shards
+    elif isinstance(shards, list):
+        sources = dict(enumerate(shards))
+    else:
+        sources = {None: shards}
+    needs_open = [isinstance(s, (str, os.PathLike)) for s in sources.values()]
 
-    file_objs: list[IO[bytes]] = [
-        builtins.open(tar, "rb") if needs else tar
-        for tar, needs in zip(shards, needs_open, strict=True)
-    ]
+    file_objs: dict[int | None, IO[bytes]] = {
+        idx: builtins.open(tar, "rb") if needs else tar
+        for (idx, tar), needs in zip(sources.items(), needs_open, strict=True)
+    }
     try:
         return _build_index_from_fileobjs(
-            file_objs,
+            file_objs.items(),
             progress_bar=progress_bar,
-            use_shard_indices=is_sharded,
         )
     finally:
-        for needs, file_obj in zip(needs_open, file_objs, strict=True):
+        for needs, file_obj in zip(needs_open, file_objs.values(), strict=True):
             if needs:
                 file_obj.close()
 
@@ -133,7 +140,7 @@ def dump(
 
 def open(
     path: str | os.PathLike,
-    shards: list[Shard] | Shard | None = None,
+    shards: dict[int, Shard] | list[Shard] | Shard | None = None,
     open_fn: Callable[[str | os.PathLike], IO[bytes]] | None = None,
     buffered_file_reader: bool = True,
 ) -> IndexedTarFile:
@@ -142,7 +149,7 @@ def open(
     path = Path(path)
     index = load(path)
     layout = IndexLayout(path)
-    resolved_shards: list[Shard] | Shard | ShardResolver
+    resolved_shards: dict[int, Shard] | list[Shard] | Shard | ShardResolver
     if shards is not None:
         resolved_shards = shards
     else:
@@ -157,7 +164,7 @@ def open(
 
 def create(
     path: str | os.PathLike,
-    shards: list[Shard] | Shard,
+    shards: dict[int, Shard] | list[Shard] | Shard,
     *,
     progress_bar: bool = True,
 ) -> IndexedTarIndex:
