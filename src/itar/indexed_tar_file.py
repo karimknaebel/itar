@@ -13,7 +13,7 @@ from .utils import (
 )
 
 IndexedTarIndex = dict[
-    str, (int | None, MemberRecord)
+    str, tuple[int | None, MemberRecord]
 ]  # fname -> (shard_idx, MemberRecord)
 Shard = str | os.PathLike | IO[bytes]
 ShardResolver = Callable[[int | None], Shard]

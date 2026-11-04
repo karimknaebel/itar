@@ -109,24 +109,24 @@ def build(
 def load(path: str | os.PathLike) -> IndexedTarIndex:
     """Load an index dictionary from a saved ``.itar`` index file."""
 
-    import msgpack
+    import msgspec
 
     path = Path(path)
     with builtins.open(path, "rb") as f:
-        return msgpack.load(f)
+        return msgspec.msgpack.decode(f.read(), type=IndexedTarIndex)
 
 
 def dump(
     index: IndexedTarIndex,
     path: str | os.PathLike,
 ) -> None:
-    """Persist ``index`` to disk in msgpack format."""
+    """Persist ``index`` to disk in MessagePack format."""
 
-    import msgpack
+    import msgspec
 
     path = Path(path)
     with builtins.open(path, "wb") as f:
-        msgpack.dump(index, f)
+        f.write(msgspec.msgpack.encode(index))
 
 
 def open(

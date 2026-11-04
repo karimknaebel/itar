@@ -417,6 +417,7 @@ def test_single_shard_basename_roundtrip(tmp_path):
     assert {shard_idx for shard_idx, _ in index_mapping.values()} == {None}
 
     with itar.open(index_path) as reopened:
+        index_path.unlink()
         for name, content in files.items():
             with reopened[name] as fh:
                 assert fh.read() == content
@@ -452,8 +453,26 @@ def test_single_input_bytesio_dump(tmp_path):
     itar.index.dump(index, index_path)
 
     index_mapping = itar.index.load(index_path)
+    assert index_mapping == index
     assert set(index_mapping) == set(files)
     assert {shard_idx for shard_idx, _ in index_mapping.values()} == {None}
+
+
+@pytest.mark.parametrize(
+    "index",
+    [
+        {},
+        {
+            "dir/文件.txt": (None, (0, 512, 0)),
+            "link": (0, (1024, 1536, "dir/文件.txt")),
+            "large": (256, (2**63, 2**63 + 512, 2**64 - 1)),
+        },
+    ],
+)
+def test_index_roundtrip(tmp_path, index):
+    index_path = tmp_path / "archive.itar"
+    itar.index.dump(index, index_path)
+    assert itar.index.load(index_path) == index
 
 
 def test_open_with_explicit_shards_override(tmp_path):
