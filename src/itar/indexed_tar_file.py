@@ -73,10 +73,7 @@ class IndexedTarFile(Mapping):
             else:
                 sources = {None: shards}
 
-            def resolver(idx: int | None) -> Shard:
-                return sources[idx]
-
-            self._resolver = resolver
+            self._resolver = sources.__getitem__
 
     def _ensure_shard(self, shard_idx: int | None) -> IO[bytes]:
         if shard_idx in self._handles:

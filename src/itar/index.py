@@ -1,7 +1,6 @@
 import builtins
 import os
 import re
-from collections.abc import Iterable
 from pathlib import Path
 from typing import IO, Callable
 
@@ -68,24 +67,6 @@ class DefaultResolver:
             ) from None
 
 
-def _build_index_from_fileobjs(
-    file_objs: Iterable[tuple[int | None, IO[bytes]]],
-    *,
-    progress_bar: bool,
-) -> IndexedTarIndex:
-    iterator = file_objs
-    if progress_bar:
-        from tqdm import tqdm
-
-        iterator = tqdm(file_objs, desc="Building index", unit="shard")
-
-    return {
-        name: (i, member)
-        for i, file_obj in iterator
-        for name, member in build_tar_index(file_obj).items()
-    }
-
-
 def build(
     shards: dict[int, Shard] | list[Shard] | Shard,
     *,
@@ -98,21 +79,17 @@ def build(
         sources = dict(enumerate(shards))
     else:
         sources = {None: shards}
-    needs_open = [isinstance(s, (str, os.PathLike)) for s in sources.values()]
+    iterator = sources.items()
+    if progress_bar:
+        from tqdm import tqdm
 
-    file_objs: dict[int | None, IO[bytes]] = {
-        idx: builtins.open(tar, "rb") if needs else tar
-        for (idx, tar), needs in zip(sources.items(), needs_open, strict=True)
+        iterator = tqdm(iterator, desc="Building index", unit="shard")
+
+    return {
+        name: (shard_id, member)
+        for shard_id, source in iterator
+        for name, member in build_tar_index(source).items()
     }
-    try:
-        return _build_index_from_fileobjs(
-            file_objs.items(),
-            progress_bar=progress_bar,
-        )
-    finally:
-        for needs, file_obj in zip(needs_open, file_objs.values(), strict=True):
-            if needs:
-                file_obj.close()
 
 
 def load(path: str | os.PathLike) -> IndexedTarIndex:

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import itar
-from itar.cli import _cmd_cat, _cmd_index_create, main
+from itar.cli import CLIError, _cmd_cat, _cmd_index_create, main
 from itar.indexed_tar_file import IndexedTarFile
 from itar.utils import TarIndexError, build_tar_index
 
@@ -493,6 +493,109 @@ def test_explicit_shard_ids_roundtrip(tmp_path):
         with archive["b.txt"] as member:
             assert member.read() == b"b"
     assert all(not shard.closed for shard in shards.values())
+
+
+@pytest.mark.parametrize("failure", [None, "missing", "invalid"])
+def test_build_closes_shards_sequentially(tmp_path, monkeypatch, failure):
+    stream = make_tar_bytes({"stream.txt": b"stream"})
+    first = tmp_path / "first.tar"
+    first.write_bytes(make_tar_bytes({"first.txt": b"first"}).getvalue())
+    second = tmp_path / "second.tar"
+    if failure == "invalid":
+        second.write_bytes(b"not a tar file")
+    elif failure is None:
+        second.write_bytes(make_tar_bytes({"second.txt": b"second"}).getvalue())
+
+    handles = []
+    original_open = open
+
+    def tracked_open(*args, **kwargs):
+        assert all(handle.closed for handle in handles)
+        handle = original_open(*args, **kwargs)
+        handles.append(handle)
+        return handle
+
+    monkeypatch.setattr("builtins.open", tracked_open)
+    monkeypatch.setattr(tarfile, "bltn_open", tracked_open)
+    shards = {7: stream, 10: first, 42: second}
+    if failure is None:
+        index = itar.index.build(shards)
+        assert {name: record[0] for name, record in index.items()} == {
+            "stream.txt": 7,
+            "first.txt": 10,
+            "second.txt": 42,
+        }
+    else:
+        with pytest.raises(
+            FileNotFoundError if failure == "missing" else tarfile.ReadError
+        ):
+            itar.index.build(shards)
+
+    assert len(handles) == (1 if failure == "missing" else 2)
+    assert all(handle.closed for handle in handles)
+    assert not stream.closed
+
+
+def test_build_leaves_invalid_stream_open():
+    stream = io.BytesIO(b"not a tar file")
+    with pytest.raises(tarfile.ReadError):
+        itar.index.build(stream)
+    assert not stream.closed
+
+
+def test_explicit_shard_mapping_is_copied():
+    shards = {7: make_tar_bytes({"a.txt": b"original"})}
+    with IndexedTarFile(shards, itar.index.build(shards)) as archive:
+        shards[7] = make_tar_bytes({"a.txt": b"replaced"})
+        with archive["a.txt"] as member:
+            assert member.read() == b"original"
+
+
+@pytest.mark.parametrize("ambiguous", [False, True])
+def test_create_rejects_missing_or_ambiguous_shards(tmp_path, ambiguous):
+    if ambiguous:
+        (tmp_path / "archive.tar").touch()
+        (tmp_path / "archive-7.tar").touch()
+    with pytest.raises(
+        CLIError, match="Found both" if ambiguous else "No shards found"
+    ):
+        _cmd_index_create(
+            SimpleNamespace(
+                index=tmp_path / "archive.itar",
+                shards=None,
+                single_tar=None,
+                progress=False,
+            )
+        )
+
+
+def test_build_duplicate_members_use_last_entry():
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w") as archive:
+        for data in [b"first", b"last"]:
+            member = tarfile.TarInfo("duplicate.txt")
+            member.size = len(data)
+            archive.addfile(member, io.BytesIO(data))
+
+    with IndexedTarFile(stream, itar.index.build(stream)) as archive:
+        with archive["duplicate.txt"] as member:
+            assert member.read() == b"last"
+
+
+def test_create_duplicate_members_use_highest_discovered_shard_id(tmp_path):
+    for shard_id in [10, 2]:
+        (tmp_path / f"archive-{shard_id}.tar").write_bytes(
+            make_tar_bytes({"duplicate.txt": str(shard_id).encode()}).getvalue()
+        )
+    index_path = tmp_path / "archive.itar"
+    _cmd_index_create(
+        SimpleNamespace(index=index_path, shards=None, single_tar=None, progress=False)
+    )
+
+    assert itar.index.load(index_path)["duplicate.txt"][0] == 10
+    with itar.open(index_path) as archive:
+        with archive["duplicate.txt"] as member:
+            assert member.read() == b"10"
 
 
 def test_single_shard_basename_roundtrip(tmp_path):

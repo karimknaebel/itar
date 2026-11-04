@@ -121,29 +121,24 @@ def _resolve_shards_for_create(
     indexed_shards = layout.discover_shards()
     single_tar_candidate = layout.single_tar()
     has_single = single_tar_candidate.is_file()
-    has_indexed = len(indexed_shards) > 0
-
-    if has_single and has_indexed:
+    if has_single and indexed_shards:
         raise CLIError(
             "Found both single (`name.tar`) and sharded (`name-ID.tar`) archives. "
             "Please remove one convention before building the index."
         )
 
     if has_single:
-        shards = single_tar_candidate
-        shard_count = 1
-    else:
-        shards = indexed_shards
-        shard_count = len(shards)
-        if shard_count < 1:
-            raise CLIError(
-                f"No shards found for {index_path}.\n"
-                f"Please create shard files first. Expected pattern: "
-                f"'{index_path.stem}-ID.tar' (nonnegative decimal shard ID) "
-                f"or '{index_path.stem}.tar' for a single shard."
-            )
+        return single_tar_candidate, 1
 
-    return shards, shard_count
+    if not indexed_shards:
+        raise CLIError(
+            f"No shards found for {index_path}.\n"
+            f"Please create shard files first. Expected pattern: "
+            f"'{index_path.stem}-ID.tar' (nonnegative decimal shard ID) "
+            f"or '{index_path.stem}.tar' for a single shard."
+        )
+
+    return indexed_shards, len(indexed_shards)
 
 
 def _cmd_cat(args) -> None:
