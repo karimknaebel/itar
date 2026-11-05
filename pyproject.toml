@@ -4,7 +4,7 @@ version = "0.4.2"
 description = "tar file index for constant-time member access"
 readme = "README.md"
 authors = [
-    { name = "Karim Abou Zeid", email = "contact@ka.codes" }
+    { name = "Karim Knaebel", email = "contact@knaebel.dev" }
 ]
 requires-python = ">=3.10"
 dependencies = [
@@ -25,5 +25,5 @@ dev = [
 itar = "itar.cli:main"
 
 [build-system]
-requires = ["uv_build>=0.9.0,<0.10.0"]
+requires = ["uv_build>=0.13.0,<0.14.0"]
 build-backend = "uv_build"
