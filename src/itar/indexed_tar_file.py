@@ -2,6 +2,7 @@ import os
 from collections.abc import Mapping
 from io import BufferedReader
 from tarfile import TarInfo
+from threading import Lock
 from typing import IO, Callable
 
 from .utils import (
@@ -62,6 +63,7 @@ class IndexedTarFile(Mapping):
         self._resolver: ShardResolver
         self._handles: dict[int | None, IO[bytes]] = {}
         self._closable: set[int | None] = set()
+        self._shard_lock = Lock()
 
         if callable(shards):
             self._resolver = shards  # type: ignore[assignment]
@@ -79,15 +81,17 @@ class IndexedTarFile(Mapping):
         if shard_idx in self._handles:
             return self._handles[shard_idx]
 
-        source = self._resolver(shard_idx)
-        if isinstance(source, (str, os.PathLike)):
-            handle = self._open_fn(source)
-            self._handles[shard_idx] = handle
-            self._closable.add(shard_idx)
-            return handle
+        with self._shard_lock:
+            if shard_idx in self._handles:
+                return self._handles[shard_idx]
 
-        self._handles[shard_idx] = source
-        return source
+            source = self._resolver(shard_idx)
+            if isinstance(source, (str, os.PathLike)):
+                source = self._open_fn(source)
+                self._closable.add(shard_idx)
+
+            self._handles[shard_idx] = source
+            return source
 
     def file(self, name: str) -> IO[bytes]:
         """Return a readable file-like object for an indexed member."""

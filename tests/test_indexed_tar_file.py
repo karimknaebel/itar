@@ -3,7 +3,7 @@ import os
 import subprocess
 import tarfile
 import threading
-from functools import partial
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -11,7 +11,7 @@ import pytest
 import itar
 from itar.cli import CLIError, _cmd_cat, _cmd_index_create, main
 from itar.indexed_tar_file import IndexedTarFile
-from itar.utils import TarIndexError, build_tar_index
+from itar.utils import TarIndexError, ThreadSafeFileIO, build_tar_index
 
 
 def make_tar_bytes(files):
@@ -302,65 +302,113 @@ def test_threadlocalpreadio_vs_open_with_sparse(gnu_sparse_tar):
         build_tar_index(gnu_sparse_tar)
 
 
-def test_indexed_tar_file_race_condition(tmp_path):
-    """
-    This test demonstrates a race condition in the non-thread-safe IndexedTarFile
-    when multiple threads read from the same shard. The file descriptor offset is shared,
-    so concurrent reads can interfere with each other, causing data corruption.
+@pytest.mark.parametrize(
+    "method, args",
+    [
+        ("read", ()),
+        ("read", (0,)),
+        ("read", (1,)),
+        ("seek", (0,)),
+        ("seek", (0, os.SEEK_END)),
+        ("tell", ()),
+        ("fileno", ()),
+        ("readable", ()),
+        ("seekable", ()),
+        ("writable", ()),
+        ("__enter__", ()),
+    ],
+)
+def test_threadsafe_file_rejects_io_after_close(tmp_path, method, args):
+    path = tmp_path / "file"
+    path.write_bytes(b"hello")
+    reader = ThreadSafeFileIO(path)
+    reader.close()
+    with pytest.raises(ValueError, match="closed file"):
+        getattr(reader, method)(*args)
+    reader.close()
 
-    This test can be flaky, as it relies on timing and may not always trigger.
-    """
-    NUM_READS = 10000  # increase to make it more likely to hit
 
+@pytest.mark.parametrize("buffered", [False, True])
+def test_member_read_after_archive_close(tmp_path, buffered):
+    path = tmp_path / "archive.tar"
+    path.write_bytes(make_tar_bytes({"a.txt": b"hello"}).getvalue())
+    with IndexedTarFile(
+        path, itar.index.build(path), buffered_file_reader=buffered
+    ) as archive:
+        member = archive["a.txt"]
+
+    with member:
+        with pytest.raises(ValueError, match="closed file"):
+            member.read()
+
+
+@pytest.mark.parametrize("reader_type", [io.FileIO, ThreadSafeFileIO])
+@pytest.mark.parametrize("buffered", [False, True])
+def test_indexed_tar_file_concurrent_reads(tmp_path, reader_type, buffered):
     files = {"a.txt": b"hello", "b.txt": b"world"}
     tar_path = tmp_path / "race_shard-0.tar"
-    with tarfile.open(tar_path, "w") as tf:
-        for name, data in files.items():
-            info = tarfile.TarInfo(name)
-            info.size = len(data)
-            tf.addfile(info, io.BytesIO(data))
-
+    tar_path.write_bytes(make_tar_bytes(files).getvalue())
     index_path = tmp_path / "race_shard.itar"
-    itar.index.create(index_path, [tar_path])
+    itar.index.create(index_path, [tar_path], progress_bar=False)
+    barrier = threading.Barrier(2, timeout=10)
 
-    def multi_threaded_read_corrupted(archive):
-        results = {}
+    class CoordinatedReader(reader_type):
+        def seek(self, offset, whence=0):
+            position = super().seek(offset, whence)
+            barrier.wait()
+            return position
+
+    with itar.open(
+        index_path, open_fn=CoordinatedReader, buffered_file_reader=buffered
+    ) as archive:
+        archive.file("a.txt").close()
 
         def read_file(name):
-            # Read the file multiple times to increase the chance of a race
-            for _ in range(NUM_READS):
-                with archive[name] as f:
-                    data = f.read()
-                    if data != files[name]:
-                        # Save the corrupted data for debugging
-                        results.setdefault(name, []).append(data)
+            with archive[name] as member:
+                return member.read()
 
-        threads = []
-        for name in files:
-            t = threading.Thread(target=read_file, args=(name,))
-            threads.append(t)
-            t.start()
-        for t in threads:
-            t.join()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(read_file, files))
 
-        # If the implementation is not thread-safe, at least one read should be corrupted
-        return any(
-            any(d != files[name] for d in datas) for name, datas in results.items()
-        )
+    if reader_type is ThreadSafeFileIO:
+        assert results == list(files.values())
+    else:
+        assert results != list(files.values())
 
-    # not thread-safe, should have corrupted reads
-    with itar.open(
-        index_path, open_fn=partial(open, mode="rb", buffering=0)
-    ) as archive:
-        assert multi_threaded_read_corrupted(archive), (
-            "There should be corrupted reads due to race conditions"
-        )
 
-    # thread-safe, should not have corrupted reads
-    with itar.open(index_path) as archive:
-        assert not multi_threaded_read_corrupted(archive), (
-            "There should be no corrupted reads in thread-safe mode"
-        )
+def test_concurrent_first_access_opens_shard_once(tmp_path):
+    files = {"a.txt": b"hello", "b.txt": b"world"}
+    tar_path = tmp_path / "archive-0.tar"
+    tar_path.write_bytes(make_tar_bytes(files).getvalue())
+    index_path = tmp_path / "archive.itar"
+    itar.index.create(index_path, [tar_path], progress_bar=False)
+    barrier = threading.Barrier(2, timeout=10)
+    local = threading.local()
+    handles = []
+
+    class CoordinatedHandles(dict):
+        def __contains__(self, key):
+            found = super().__contains__(key)
+            if not found and not getattr(local, "checked", False):
+                local.checked = True
+                barrier.wait()
+            return found
+
+    def open_shard(path):
+        handle = ThreadSafeFileIO(path)
+        handles.append(handle)
+        return handle
+
+    with itar.open(index_path, open_fn=open_shard) as archive:
+        archive._handles = CoordinatedHandles()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            members = list(pool.map(archive.file, files))
+        for member, expected in zip(members, files.values(), strict=True):
+            with member:
+                assert member.read() == expected
+
+    assert len(handles) == 1
+    assert all(handle.closed for handle in handles)
 
 
 def test_indexed_tar_file_open_and_save(tmp_path, sharded_tar_and_files):

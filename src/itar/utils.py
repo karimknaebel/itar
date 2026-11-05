@@ -115,7 +115,12 @@ class ThreadSafeFileIO(io.RawIOBase):
     def _set_pos(self, val: int) -> None:
         self._local.pos = val
 
+    def _check_closed(self) -> None:
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+
     def seek(self, offset: int, whence: int = os.SEEK_SET) -> int:
+        self._check_closed()
         pos = self._get_pos()
         if whence == os.SEEK_SET:
             self._set_pos(offset)
@@ -129,9 +134,11 @@ class ThreadSafeFileIO(io.RawIOBase):
         return self._get_pos()
 
     def tell(self) -> int:
+        self._check_closed()
         return self._get_pos()
 
     def read(self, size: int = -1) -> bytes:
+        self._check_closed()
         if size < 0:
             raise NotImplementedError("read(size=-1) not supported")
         pos = self._get_pos()
@@ -140,12 +147,15 @@ class ThreadSafeFileIO(io.RawIOBase):
         return data
 
     def readable(self) -> bool:
+        self._check_closed()
         return True
 
     def seekable(self) -> bool:
+        self._check_closed()
         return True
 
     def writable(self) -> bool:
+        self._check_closed()
         return False
 
     def close(self) -> None:
@@ -154,17 +164,12 @@ class ThreadSafeFileIO(io.RawIOBase):
         super().close()
 
     def fileno(self) -> int:
+        self._check_closed()
         return self._fd
 
     @property
     def name(self) -> str:  # optional
         return self._path
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, tb):
-        self.close()
 
 
 class TarFileSectionIO(io.RawIOBase):
